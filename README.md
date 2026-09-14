@@ -17,15 +17,15 @@ The board is an observer, not a control surface. It contains no terminal, agent,
 
 ### Roadmap board
 
-![Roadmap board showing numerically ordered phases and selected-phase plans](docs/images/board-overview.png)
+![Roadmap board showing numerically ordered phases and selected-phase plans](images/board-overview.png)
 
 ### Phase details
 
-![Phase details panel with requirements and evidence maturity](docs/images/phase-inspector.png)
+![Phase details panel with requirements and evidence maturity](images/phase-inspector.png)
 
 ### Plan details
 
-![Plan details panel with intent, architecture impact, and guardrails](docs/images/plan-inspector.png)
+![Plan details panel with intent, architecture impact, and guardrails](images/plan-inspector.png)
 
 ## Requirements
 
@@ -66,6 +66,10 @@ npm test -- --run
 ```
 
 The Vitest suite covers RPC boundaries, restricted decoders, path containment, snapshots, watcher behavior, and panel flows using a fake host. It complements, but does not replace, validation in a rendered Paseo host.
+
+## Limitations
+
+The plugin requires a selected workspace with GSD planning artifacts. It presents only evidence it can safely read; absent, malformed, oversized, or inaccessible artifacts remain explicit warnings or unavailable states.
 
 ## Scope
 
