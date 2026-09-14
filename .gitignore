@@ -1,0 +1,15 @@
+# Local source-grounding references; not part of this project.
+/external/
+
+# Local development dependencies and test output.
+/node_modules/
+/coverage/
+
+# Local, non-versioned verification dossiers and their binary evidence.
+/artifacts/
+
+# Local GSD workflow state and agent instructions are not part of the public plugin.
+/.planning/
+/.gsd/
+/AGENTS.md
+/paseo-gsd-observer.md
