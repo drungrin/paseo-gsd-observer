@@ -2,7 +2,8 @@
   "name": "paseo-gsd-observer",
   "private": true,
   "type": "module",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest"
