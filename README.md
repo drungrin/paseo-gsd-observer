@@ -1,35 +1,42 @@
 # Paseo GSD Observer
 
-A read-only Paseo plugin for understanding the persisted state of a GSD project. It turns the selected workspace's planning evidence into an accessible board of milestones, phases, and plans—without running GSD, creating worktrees, merging code, or declaring work complete.
+A read-only Paseo plugin for understanding the persisted state of a GSD project. It turns the selected workspace's current planning evidence into accessible, read-only tabs—without running GSD, creating worktrees, merging code, or declaring work complete.
 
-## Phase 1: Safe Evidence Board
+![Overview tab showing STATE, roadmap progress, and requirements](docs/screenshots/overview.png)
 
-This public release contains the Safe Evidence Board. It lets you:
+Screenshots show a copy of the public [UniClipboard](https://github.com/UniClipboard/UniClipboard) project's planning, adapted for this showcase: some files were renamed or reformatted to GSD conventions, and the validation, UAT, parking-lot, and backlog TODO entries are illustrative. Project text appears in its original language.
 
-- Browse the current roadmap and safely observed archived milestones.
-- Read phase status, plan and summary counts, and evidence limitations without treating missing data as success or failure.
-- Select a phase, inspect its plans, and open focused phase or plan details.
-- Refresh evidence explicitly; filesystem changes only mark the view as potentially stale.
+## What it shows
+
+The board is a set of read-only tabs over the selected workspace's current planning evidence:
+
+- **Overview**: STATE, roadmap progress, and requirements.
+- **Plans**: current-milestone phases with their plans, summaries, and phase checks.
+- **Context**: decisions and boundaries recorded in each phase's CONTEXT.
+- **Validation**: per-phase validation maps and Nyquist status.
+- **Verification**: per-phase verification reports, truths, and human checks.
+- **UAT**: per-phase user acceptance tests and their recorded results.
+- **TODOs**: standalone TODO files across pending, backlog, and completed folders.
+- **Parking Lot**: unsequenced 999.x entries in the roadmap Backlog.
+- **Debug**: GSD debug sessions in the active debug directory and its resolved archive.
+
+Statuses are shown as recorded, and disagreements between sources are flagged rather than resolved. Refresh evidence explicitly; filesystem changes only mark the view as potentially stale.
+
+| Plans | Context |
+| --- | --- |
+| ![Plans tab showing the current phase's progress stages and plans](docs/screenshots/plans.png) | ![Context tab showing a phase boundary and numbered decisions](docs/screenshots/context.png) |
+| **Validation** | **Verification** |
+| ![Validation tab showing a per-task verification map and open sign-off items](docs/screenshots/validation.png) | ![Verification tab showing a phase whose report records an open gap and an unresolved human check](docs/screenshots/verification.png) |
+| **UAT** | **TODOs** |
+| ![UAT tab showing passing, failing, and pending acceptance tests](docs/screenshots/uat.png) | ![TODOs tab listing standalone TODO files by folder](docs/screenshots/todos.png) |
+| **Parking Lot** | **Debug** |
+| ![Parking Lot tab listing parked and absorbed backlog entries](docs/screenshots/parking-lot.png) | ![Debug tab listing sessions by recorded status](docs/screenshots/debug.png) |
 
 The board is an observer, not a control surface. It contains no terminal, agent, lifecycle, merge, cleanup, or write action.
 
-## Screenshots
-
-### Roadmap board
-
-![Roadmap board showing numerically ordered phases and selected-phase plans](images/board-overview.png)
-
-### Phase details
-
-![Phase details panel with requirements and evidence maturity](images/phase-inspector.png)
-
-### Plan details
-
-![Plan details panel with intent, architecture impact, and guardrails](images/plan-inspector.png)
-
 ## Requirements
 
-- Paseo plugin support compatible with the manifest range: `>=0.8.0 <0.9.0`.
+- Paseo plugin support compatible with the manifest range: `>=0.9.0`.
 - Node.js and this repository's dependencies installed with `npm ci`.
 - An open, selected workspace containing GSD planning artifacts.
 
@@ -50,7 +57,7 @@ Open a GSD workspace in Paseo and select **Open GSD Board** from its workspace p
 
 All filesystem access stays in the Paseo server process. Before reading, the plugin resolves the selected workspace through Paseo, follows real paths, enforces containment under the real `.planning` root, and reads only a fixed allowlist of artifacts.
 
-- Individual artifact reads are capped at **256 KiB**; a snapshot has a **4 MiB** total budget.
+- Individual artifact reads are capped at **256 KiB**; a snapshot has an **8 MiB** budget for planning evidence plus a separate **3 MiB** budget for debug sessions.
 - Symlinks, file replacement, oversized input, malformed content, unknown formats, and paths outside the trusted root become explicit warnings or unavailable evidence.
 - The client receives validated IDs, labels, counts, warnings, and evidence categories—not raw artifact bodies, paths, logs, prompts, arguments, tokens, or secrets.
 - Completion is shown only when allowlisted evidence establishes it. The observer never infers lifecycle state from a process, log, timestamp, or absent file.

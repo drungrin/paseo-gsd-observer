@@ -8,8 +8,16 @@ vi.mock("react-native", () => ({
   Pressable: "Pressable",
   ScrollView: "ScrollView",
   FlatList: "FlatList",
+  Platform: { OS: "web" },
 }));
-import { BoardView, createBoardController } from "../../index.client";
+vi.mock("@getpaseo/plugin/client/react-native", () => ({ ScrollView: "PaseoScrollView" }));
+vi.mock("react", async (importOriginal) => {
+  const original = await importOriginal<typeof import("react")>();
+  return { ...original, useState: (value: unknown) => [value, vi.fn()] };
+});
+import { createBoardController } from "../../index.client";
+import { OverviewView } from "../../client/overview-components";
+import { PlansView } from "../../client/plans-components";
 import { createBoardService } from "../../index.server";
 import { boardRpc } from "../../shared/board-rpc";
 import { fixtureFiles } from "../fixtures/gsd-fixtures";
@@ -17,46 +25,40 @@ import { FakeHost } from "../helpers/fake-host";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 import { FakeWatcher } from "../helpers/fake-watcher";
 
-const nodes = (node: unknown): Array<{ props?: Record<string, unknown> }> => {
-  if (!node || typeof node !== "object") return [];
-  const value = node as { props?: Record<string, unknown> };
-  const children = value.props?.children;
-  return [value, ...(Array.isArray(children) ? children : [children]).flatMap(nodes)];
+const theme = { colors: { surface0: "#000", foreground: "#fff", foregroundMuted: "#aaa", accent: "#0af", accentForeground: "#000" } };
+type Node = { type?: unknown; props?: Record<string, unknown> };
+const expand = (node: unknown): unknown => {
+  if (Array.isArray(node)) return node.map(expand);
+  if (!node || typeof node !== "object") return node;
+  const value = node as Node;
+  if (typeof value.type === "function") return expand((value.type as (props: Record<string, unknown>) => unknown)(value.props ?? {}));
+  return { ...value, props: { ...value.props, children: expand(value.props?.children) } };
 };
+const nodes = (node: unknown): Node[] => {
+  if (Array.isArray(node)) return node.flatMap(nodes);
+  if (!node || typeof node !== "object") return [];
+  const value = node as Node;
+  return [value, ...nodes(value.props?.children)];
+};
+const text = (node: unknown): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" ? text((node as Node).props?.children) : "";
 
 describe("board tracer", () => {
-  it("uses the same safe board in a compact layout with compact spacing", () => {
-    const view = BoardView({
-      state: { workspaceId: "selected", snapshot: null, busy: false, error: null },
-      onRefresh: () => undefined,
-      theme: { colors: { surface0: "#000", foreground: "#fff", foregroundMuted: "#aaa", accent: "#0af", accentForeground: "#000" } },
-      compact: true,
-    } as Parameters<typeof BoardView>[0] & { compact: true });
-    expect((view.props as { style: { padding: number } }).style.padding).toBe(8);
-  });
-
   it("keeps the refresh-to-plan evidence path reachable in wide and compact layouts", async () => {
-    const workspace = await FixtureWorkspace.create(fixtureFiles);
+    const workspace = await FixtureWorkspace.create([
+      { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 59.3: Contracts\n" },
+      { path: ".planning/STATE.md", content: "---\nmilestone: v2.0\ncurrent_phase: \"59.3\"\n---\n" },
+      { path: ".planning/phases/59.3-contracts/59.3-01-PLAN.md", content: "---\nphase: 59.3-contracts\nplan: \"01\"\n---\n# Plan 01: Contract registry\n" },
+    ]);
     const host = new FakeHost();
     host.registerWorkspace("selected", workspace.root);
     const service = createBoardService({ resolveWorkspace: async (id) => host.resolveWorkspace(id) });
     host.handle(boardRpc, (input) => service.handle(input as never));
     const controller = createBoardController({ workspaceId: "selected", callBoardRpc: (input) => host.invoke(boardRpc, input, "selected") });
     await controller.dispatch("refresh");
-    const milestone = controller.getState().snapshot?.milestones.find((item) => !item.archived);
-    const phase = milestone?.phases[0];
-    const plan = phase?.plans[0];
-    expect(milestone && phase && plan).toBeTruthy();
-    if (!milestone || !phase || !plan) throw new Error("fixture has no observable phase plan");
-    controller.selectPhase(milestone.id, phase.id);
-    controller.togglePlans(milestone.id, phase.id);
-    controller.selectPlan(milestone.id, plan.id);
+    expect(controller.getState().snapshot?.overview?.plans.phases.map((phase) => phase.id)).toEqual(["59.3"]);
     for (const compact of [false, true]) {
-      const view = BoardView({ state: controller.getState(), onRefresh: () => undefined, compact, inspectedPlanId: plan.id, theme: { colors: { surface0: "#000", foreground: "#fff", foregroundMuted: "#aaa", accent: "#0af", accentForeground: "#000" } } });
-      expect(nodes(view).some((node) => node.props?.accessibilityLabel === `Phase detail ${phase.phaseId}`)).toBe(true);
-      expect(nodes(view).some((node) => node.props?.accessibilityLabel === "Plan details side panel")).toBe(true);
-      expect(nodes(view).some((node) => (node.props?.style as { flexDirection?: string } | undefined)?.flexDirection === (compact ? "column" : "row"))).toBe(true);
-      expect(nodes(view).find((node) => node.props?.accessibilityLabel === "Phase navigation")?.props?.style).toMatchObject({ flex: 1, minWidth: 0 });
+      const content = text(expand(PlansView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })));
+      expect(content).toContain("Contract registry");
     }
     controller.dispose();
     await service.close();
@@ -70,11 +72,12 @@ describe("board tracer", () => {
     const service = createBoardService({ resolveWorkspace: async (id) => host.resolveWorkspace(id) });
     host.handle(boardRpc, (input) => service.handle(input as never));
     const controller = createBoardController({ workspaceId: "selected", callBoardRpc: (input) => host.invoke(boardRpc, input, "selected") });
+    expect(controller.getState().snapshot).toBeNull();
     await controller.dispatch("refresh");
-    expect(controller.getState().snapshot?.milestones[0]).toMatchObject({ id: "2.2", title: "Early" });
-    expect(controller.getState().snapshot?.milestones.find((milestone) => milestone.archived)).toMatchObject({ id: "archive:v0.1", title: "Arquivo v0.1" });
-    await controller.dispatch("archive", "archive:v0.1");
-    expect(controller.getState().snapshot?.milestones.find((milestone) => milestone.id === "archive:v0.1")?.phases).toHaveLength(1);
+    expect(controller.getState().snapshot).toMatchObject({ workspaceId: "selected", availability: "available", freshness: "current" });
+    // Archived milestones are no longer read or published.
+    expect(JSON.stringify(controller.getState().snapshot)).not.toMatch(/Archived roadmap|Archived phase|v0\.1/);
+    await expect(host.invoke(boardRpc, { workspaceId: "selected", intent: "archive", milestoneId: "archive:v0.1" }, "selected")).rejects.toBeDefined();
     await expect(host.invoke(boardRpc, { workspaceId: "selected", intent: "refresh", root: workspace.root }, "selected")).rejects.toBeDefined();
     await service.close();
     await workspace.cleanup();
@@ -91,8 +94,9 @@ describe("board tracer", () => {
     const status = await service.handle({ workspaceId: "selected", intent: "status" });
     expect(status).toMatchObject({ freshness: "stale", observedAt: first.snapshot.observedAt });
     let refreshes = 0;
-    const view = BoardView({ state: { workspaceId: "selected", snapshot: first.snapshot, busy: false, error: null }, onRefresh: () => { refreshes += 1; }, theme: { colors: { surface0: "#000", foreground: "#fff", foregroundMuted: "#aaa", accent: "#0af", accentForeground: "#000" } } });
-    const button = nodes(view).find((node) => node.props?.label === "Refresh");
+    const view = expand(OverviewView({ state: { workspaceId: "selected", snapshot: { ...first.snapshot, freshness: "stale" }, busy: false, error: null }, onRefresh: () => { refreshes += 1; }, theme, showTable: false, onToggleTable: () => undefined }));
+    expect(text(view)).toContain("Refresh");
+    const button = nodes(view).find((node) => node.props?.accessibilityLabel === "Refresh overview");
     (button?.props?.onPress as (() => void) | undefined)?.();
     expect(refreshes).toBe(1);
     await service.close();
@@ -108,7 +112,7 @@ describe("board tracer", () => {
     const pending = controller.dispatch("refresh");
     expect(typeof (controller as unknown as { setWorkspace?: unknown }).setWorkspace).toBe("function");
     (controller as unknown as { setWorkspace(workspaceId: string): void }).setWorkspace("B");
-    releaseA?.({ kind: "snapshot", snapshot: { workspaceId: "A", observedAt: "2026-09-13T12:00:00.000Z", freshness: "current", availability: "available", revision: 1, milestones: [], warnings: [], limited: false } });
+    releaseA?.({ kind: "snapshot", snapshot: { workspaceId: "A", observedAt: "2026-09-13T12:00:00.000Z", freshness: "current", availability: "available", revision: 1, warnings: [], limited: false } });
     await pending;
     expect(controller.getState()).toMatchObject({ workspaceId: "B", snapshot: null });
     controller.dispose();
