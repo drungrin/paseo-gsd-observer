@@ -1,15 +1,19 @@
 import { relative, resolve, sep } from "node:path";
 import { BoardSnapshotSchema, type BoardSnapshot, type BoardStatus } from "../shared/board-rpc.js";
-import type { AllowedInventory } from "./allowed-reader.js";
+import { DEBUG_DIRECTORIES, isAllowedDebugFile, isAllowedTodoFile, TODO_DIRECTORIES, type AllowedInventory } from "./allowed-reader.js";
 
 const DEBOUNCE_MS = 150;
 const phaseDirectory = /^\d+(?:\.\d+)*-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*$/;
 const phaseArtifact = /^(?:(?:\d+(?:\.\d+)*(?:-\d+)?)-)?(?:CONTEXT|PLAN|SUMMARY|VERIFICATION|UAT|REVIEW|REVIEWS)\.md$/i;
-const archiveArtifact = /^[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*-ROADMAP\.md$/i;
-const archiveDirectory = /^[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*-phases$/;
+const optionalPhaseArtifact = /^(?:(\d+(?:\.\d+)*)-)?(?:RESEARCH|SPEC|SKELETON|SECURITY|PATTERNS|UI-SPEC|AI-SPEC|PLAN-CHECK|UI-CHECK|VALIDATION|WINDOWS|deferred-items|UI-REVIEW|EVAL-REVIEW|COVERAGE)\.md$/;
+const samePhase = (left: string, right: string) => left.split(".").map((part) => part.replace(/^0+(?=\d)/, "")).join(".") === right.split(".").map((part) => part.replace(/^0+(?=\d)/, "")).join(".");
+const currentPhaseArtifact = (directory: string, file: string) => phaseArtifact.test(file) || (() => {
+  const match = optionalPhaseArtifact.exec(file);
+  return Boolean(match && (!match[1] || samePhase(match[1], directory.split("-")[0])));
+})();
 
 export type SnapshotBuilder = (input: { workspaceId: string; inventory: AllowedInventory; observedAt: string }) => BoardSnapshot;
-export type SnapshotWatcher = { on(event: "add" | "change" | "unlink" | "error", listener: (value?: string | Error) => void): SnapshotWatcher; close(): Promise<void> };
+export type SnapshotWatcher = { on(event: "add" | "change" | "unlink" | "addDir" | "unlinkDir" | "error" | "ready", listener: (value?: string | Error) => void): SnapshotWatcher; close(): Promise<void> };
 export type WatcherOptions = { followSymlinks: false; ignoreInitial: true; depth: 0; ignored: (path: string) => boolean };
 export type SnapshotObserverOptions = {
   workspaceId: string;
@@ -31,7 +35,16 @@ const refreshFailure = (snapshot: BoardSnapshot, warning: BoardSnapshot["warning
 
 function observerPaths(planningRoot: string, inventory: AllowedInventory): string[] {
   const values = new Set<string>([planningRoot]);
+  for (const directory of inventory.watchDirectories ?? []) {
+    const segments = directory.split("/");
+    const phase = segments[0] === "phases" && segments.length <= 2 && (segments.length === 1 || phaseDirectory.test(segments[1]));
+    const todo = segments[0] === "todos" && (segments.length === 1 || (segments.length === 2 && TODO_DIRECTORIES.some((name) => name === segments[1])));
+    const debug = segments[0] === "debug" && (segments.length === 1 || (segments.length === 2 && DEBUG_DIRECTORIES.some((name) => name === segments[1])));
+    if (!phase && !todo && !debug) continue;
+    values.add(resolve(planningRoot, ...segments));
+  }
   for (const artifact of inventory.artifacts) {
+    if (artifact.kind === "todo") continue; // TODO directories are watched from validated inventory, including empty ones.
     const segments = artifact.key.split("/");
     if (segments.some((segment) => !segment || segment === "." || segment === "..")) continue;
     for (let index = 1; index < segments.length; index += 1) values.add(resolve(planningRoot, ...segments.slice(0, index)));
@@ -44,11 +57,17 @@ function isIgnored(planningRoot: string, candidate: string): boolean {
   if (!rel) return false;
   if (rel === ".." || rel.startsWith("../") || resolve(planningRoot, rel) !== resolve(candidate)) return true;
   const parts = rel.split("/");
-  if (parts.length === 1) return parts[0] !== "phases" && parts[0] !== "milestones" && !/^(?:ROADMAP|STATE|MILESTONES)\.md$/i.test(parts[0]);
-  if (parts[0] === "phases") return !phaseDirectory.test(parts[1] ?? "") || (parts.length > 2 && !phaseArtifact.test(parts[2] ?? ""));
-  if (parts[0] !== "milestones") return true;
-  if (parts.length === 2) return !archiveArtifact.test(parts[1] ?? "") && !archiveDirectory.test(parts[1] ?? "");
-  return !archiveDirectory.test(parts[1] ?? "") || !phaseDirectory.test(parts[2] ?? "") || (parts.length > 3 && !phaseArtifact.test(parts[3] ?? ""));
+  if (parts.length === 1) return parts[0] !== "phases" && parts[0] !== "todos" && parts[0] !== "debug" && !/^(?:ROADMAP|STATE|REQUIREMENTS)\.md$/i.test(parts[0]);
+  if (parts[0] === "todos") {
+    if (parts.length === 2) return !isAllowedTodoFile(parts[1]) && !TODO_DIRECTORIES.some((name) => name === parts[1]);
+    return parts.length !== 3 || !TODO_DIRECTORIES.some((name) => name === parts[1]) || !isAllowedTodoFile(parts[2]);
+  }
+  if (parts[0] === "debug") {
+    if (parts.length === 2) return !isAllowedDebugFile(parts[1]) && !DEBUG_DIRECTORIES.some((name) => name === parts[1]);
+    return parts.length !== 3 || !DEBUG_DIRECTORIES.some((name) => name === parts[1]) || !isAllowedDebugFile(parts[2]);
+  }
+  if (parts[0] === "phases") return !phaseDirectory.test(parts[1] ?? "") || parts.length > 3 || (parts.length > 2 && !currentPhaseArtifact(parts[1], parts[2] ?? ""));
+  return true;
 }
 
 export function createSnapshotObserver(options: SnapshotObserverOptions): SnapshotObserver {
@@ -57,6 +76,8 @@ export function createSnapshotObserver(options: SnapshotObserverOptions): Snapsh
   let invalidations = 0;
   let closed = false;
   let watcher: SnapshotWatcher | undefined;
+  let watchedPaths: string[] = [];
+  const retiredWatchers: SnapshotWatcher[] = [];
   let refresh: Promise<BoardSnapshot> | undefined;
   let debounce: ReturnType<typeof setTimeout> | undefined;
   const abort = new AbortController();
@@ -73,17 +94,33 @@ export function createSnapshotObserver(options: SnapshotObserverOptions): Snapsh
   const stopWatcher = async () => {
     const current = watcher;
     watcher = undefined;
-    await current?.close().catch(() => undefined);
+    watchedPaths = [];
+    await Promise.all([...(current ? [current] : []), ...retiredWatchers.splice(0)].map((owned) => owned.close().catch(() => undefined)));
   };
   const watcherFailure = () => {
     invalidate();
     snapshot = { ...snapshot, warnings: warningList([...snapshot.warnings, "observation-limited"]) };
     void stopWatcher();
   };
-  const installWatcher = (inventory: AllowedInventory) => {
-    if (watcher || !options.watcherFactory || !inventory.available || closed) return;
-    watcher = options.watcherFactory(observerPaths(options.planningRoot, inventory), { followSymlinks: false, ignoreInitial: true, depth: 0, ignored: (path) => isIgnored(options.planningRoot, path) });
-    watcher.on("add", delayedInvalidate).on("change", delayedInvalidate).on("unlink", delayedInvalidate).on("error", watcherFailure);
+  const installWatcher = async (inventory: AllowedInventory) => {
+    if (!options.watcherFactory || !inventory.available || closed) return;
+    const paths = observerPaths(options.planningRoot, inventory);
+    if (watcher && watchedPaths.length === paths.length && watchedPaths.every((path, index) => path === paths[index])) return;
+    const previous = watcher;
+    const addedPaths = Boolean(previous && paths.some((path) => !watchedPaths.includes(path)));
+    const next = options.watcherFactory(paths, { followSymlinks: false, ignoreInitial: true, depth: 0, ignored: (path) => isIgnored(options.planningRoot, path) });
+    const onChange = () => { if (watcher === next) delayedInvalidate(); };
+    next.on("add", onChange).on("change", onChange).on("unlink", onChange)
+      .on("addDir", onChange).on("unlinkDir", onChange)
+      .on("ready", () => { if (addedPaths && watcher === next) invalidate(); })
+      .on("error", () => { if (watcher === next) watcherFailure(); });
+    watcher = next;
+    watchedPaths = paths;
+    await previous?.close().catch(() => {
+      retiredWatchers.push(previous);
+      invalidate();
+      snapshot = { ...snapshot, warnings: warningList([...snapshot.warnings, "observation-limited"]) };
+    });
   };
   return {
     invalidate,
@@ -92,7 +129,7 @@ export function createSnapshotObserver(options: SnapshotObserverOptions): Snapsh
     async refresh() {
       if (refresh) return refresh;
       const startedAt = invalidations;
-      refresh = options.readInventory(options.root, abort.signal).then((inventory) => {
+      refresh = options.readInventory(options.root, abort.signal).then(async (inventory) => {
         if (closed) return snapshot;
         if (!inventory.available || inventory.warnings.includes("containment-refused")) {
           snapshot = refreshFailure(snapshot, inventory.warnings[0] ?? "unreadable");
@@ -105,7 +142,7 @@ export function createSnapshotObserver(options: SnapshotObserverOptions): Snapsh
           return snapshot;
         }
         snapshot = { ...validated.data, freshness: invalidations === startedAt ? validated.data.freshness : "stale", revision: snapshot.revision + 1 };
-        installWatcher(inventory);
+        await installWatcher(inventory);
         return snapshot;
       }).catch(() => {
         if (!closed) snapshot = refreshFailure(snapshot, "unreadable");

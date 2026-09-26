@@ -13,14 +13,13 @@ export type BoardService = { handle(input: BoardRequest, paseo?: unknown): Promi
 export type BoardServiceOptions = {
   resolveWorkspace: (workspaceId: string, paseo?: unknown) => Promise<string | null>;
   readInventory?: (directory: string) => Promise<AllowedInventory>;
-  readArchiveInventory?: (directory: string, milestoneId: string) => Promise<AllowedInventory>;
   buildSnapshot?: SnapshotBuilder;
   watcherFactory?: (paths: readonly string[], options: WatcherOptions) => SnapshotWatcher;
   clock?: () => Date;
 };
-const emptySnapshot = (workspaceId: string, warning: BoardSnapshot["warnings"][number] = "absent"): BoardSnapshot => ({ workspaceId, observedAt: null, freshness: "refresh-failed", availability: "unavailable", revision: 0, milestones: [], warnings: [warning], limited: false });
+const emptySnapshot = (workspaceId: string, warning: BoardSnapshot["warnings"][number] = "absent"): BoardSnapshot => ({ workspaceId, observedAt: null, freshness: "refresh-failed", availability: "unavailable", revision: 0, warnings: [warning], limited: false });
 
-export function createBoardService({ resolveWorkspace, readInventory = (directory) => readAllowedInventory(directory, { includeArchives: false }), readArchiveInventory = (directory, milestoneId) => readAllowedInventory(directory, { archiveMilestoneId: milestoneId }), buildSnapshot = buildBoardSnapshot, watcherFactory = (paths, options) => chokidar.watch([...paths], options) as unknown as SnapshotWatcher, clock = () => new Date() }: BoardServiceOptions): BoardService {
+export function createBoardService({ resolveWorkspace, readInventory = (directory) => readAllowedInventory(directory), buildSnapshot = buildBoardSnapshot, watcherFactory = (paths, options) => chokidar.watch([...paths], options) as unknown as SnapshotWatcher, clock = () => new Date() }: BoardServiceOptions): BoardService {
   const observations = new Map<string, Observation>();
   const ids = new Map<string, string>();
   let closed = false;
@@ -54,14 +53,6 @@ export function createBoardService({ resolveWorkspace, readInventory = (director
         const entry = find(input.workspaceId);
         if (!entry) return { kind: "status", workspaceId: input.workspaceId, observedAt: null, freshness: "refresh-failed", availability: "unavailable", revision: 0, warnings: ["absent"] };
         entry.lastUsed = now(); return entry.observer.status();
-      }
-      if (input.intent === "archive") {
-        const resolved = await resolvedEntry(input.workspaceId, paseo);
-        if (!resolved || "unavailable" in resolved) return { kind: "snapshot", snapshot: resolved?.unavailable ?? emptySnapshot(input.workspaceId, "unreadable") };
-        const inventory = await readArchiveInventory(resolved.entry.root, input.milestoneId.slice("archive:".length));
-        const candidate = buildSnapshot({ workspaceId: input.workspaceId, inventory, observedAt: clock().toISOString() });
-        const validated = BoardSnapshotSchema.safeParse(candidate);
-        return { kind: "snapshot", snapshot: validated.success ? validated.data : emptySnapshot(input.workspaceId, "unreadable") };
       }
       const known = find(input.workspaceId);
       if (input.intent === "snapshot" && known) {
