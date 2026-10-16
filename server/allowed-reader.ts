@@ -1,13 +1,14 @@
 import { constants, type Stats } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { comparePhaseIds } from "./gsd-decoder.js";
 import { isStrictDescendant, resolveWorkspaceRoot } from "./workspace-root.js";
 
 export const LIMITS = {
   bytesPerFile: 256 * 1024,
-  bytesPerSnapshot: 8 * 1024 * 1024,
+  bytesPerSnapshot: 32 * 1024 * 1024,
   directoryEntries: 2048,
-  artifacts: 512,
+  artifacts: 2048,
   phases: 256,
   plansPerPhase: 128,
   titleLength: 200,
@@ -29,7 +30,7 @@ const phaseDirPattern = new RegExp(`^(${phaseIdPattern})-([A-Za-z0-9]+(?:[.-][A-
 const reservedName = /^(?:\.|\.\.|con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 const phaseFilePattern = /^(?:(\d+(?:\.\d+)*(?:-\d+)?)-)?(CONTEXT|PLAN|SUMMARY|VERIFICATION|UAT|REVIEW|REVIEWS)\.md$/i;
 const optionalPhaseFilePattern = /^(?:(\d+(?:\.\d+)*)-)?(RESEARCH|SPEC|SKELETON|SECURITY|PATTERNS|UI-SPEC|AI-SPEC|PLAN-CHECK|UI-CHECK|VALIDATION|WINDOWS|deferred-items|UI-REVIEW|EVAL-REVIEW|COVERAGE)\.md$/;
-const OPTIONAL_BYTES = 2 * 1024 * 1024;
+const OPTIONAL_BYTES = 8 * 1024 * 1024;
 const TODO_BYTES = 2 * 1024 * 1024;
 const TODO_FILES = 128;
 export const TODO_DIRECTORIES = ["pending", "backlog", "deferred", "done", "completed"] as const;
@@ -124,6 +125,14 @@ function optionalKindForPhaseFile(name: string, phaseId: string): PhaseCheckKind
   const match = optionalPhaseFilePattern.exec(name);
   if (!match || (match[1] && (!isSafeSegment(match[1]) || canonicalPhaseId(match[1]) !== phaseId))) return null;
   return match[2].toLowerCase() as PhaseCheckKind;
+}
+
+/** The phase STATE.md names as current, read only to order phase directories: a wrong guess changes what a full budget drops first, never what is shown. */
+function currentPhaseHint(bytes: Uint8Array | undefined): string | null {
+  if (!bytes) return null;
+  const text = new TextDecoder().decode(bytes.subarray(0, 16_384));
+  const value = /^current_phase:\s*["']?(\d+(?:\.\d+)*)/m.exec(text)?.[1] ?? /^\W*Phase\W*:\W*(\d+(?:\.\d+)*)/m.exec(text)?.[1];
+  return value && isSafeSegment(value) ? canonicalPhaseId(value) : null;
 }
 
 /** Current planning evidence only: root documents, current phases and their checks, TODOs and debug sessions. */
@@ -296,12 +305,15 @@ async function readInventory(directory: string): Promise<AllowedInventory> {
   if (!phasesRootWarning) watchDirectories.push("phases");
   const phases = phasesRootWarning ? { entries: [], warning: phasesRootWarning } : await listDirectory(phasesRoot);
   if (phases.warning) recordProblem(phases.warning);
-  let phaseCount = 0;
-  for (const entry of phases.entries) {
+  // The current phase first, then newest to oldest, so a full budget or phase cap drops the oldest evidence, in the same order on every run.
+  const current = currentPhaseHint(artifacts.find((artifact) => artifact.kind === "state")?.bytes);
+  const ordered = phases.entries.flatMap((entry) => {
     const match = phaseDirPattern.exec(entry);
-    if (!match || !isSafeSegment(match[1]) || !isSafeSegment(match[2])) continue;
+    return match && isSafeSegment(match[1]) && isSafeSegment(match[2]) ? [{ entry, phaseId: canonicalPhaseId(match[1]) }] : [];
+  }).sort((a, b) => Number(b.phaseId === current) - Number(a.phaseId === current) || comparePhaseIds(b.phaseId, a.phaseId) || (a.entry < b.entry ? -1 : 1));
+  let phaseCount = 0;
+  for (const { entry, phaseId } of ordered) {
     if (++phaseCount > LIMITS.phases) { recordProblem("limit-reached"); break; }
-    const phaseId = canonicalPhaseId(match[1]);
     const phasePath = join(root.planningRoot, "phases", entry);
     const phaseWarning = await validateSafeDirectory(root.planningRoot, phasePath);
     if (phaseWarning) { recordProblem(phaseWarning === "absent" ? "containment-refused" : phaseWarning, { phaseId }); continue; }
@@ -309,7 +321,7 @@ async function readInventory(directory: string): Promise<AllowedInventory> {
     const files = await listDirectory(phasePath);
     if (files.warning) recordProblem(files.warning, { phaseId });
     let plans = 0;
-    for (const file of files.entries) {
+    for (const file of files.entries.sort()) {
       const optionalKind = optionalKindForPhaseFile(file, phaseId);
       if (optionalKind) {
         if (optionalCandidates.length < LIMITS.artifacts) optionalCandidates.push({ key: join("phases", entry, file), kind: optionalKind, phaseId });

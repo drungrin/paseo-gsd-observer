@@ -9,6 +9,13 @@ import { isStrictDescendant, resolveWorkspaceRoot } from "../../server/workspace
 import { fixtureFiles } from "../fixtures/gsd-fixtures";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 
+/** Plan files spread over phase 1 and decimal phases after it, so no phase reaches the per-phase plan cap. */
+const planFiles = (count: number, content: string) => Array.from({ length: count }, (_, index) => {
+  const group = Math.floor(index / 100);
+  const [directory, id] = group === 0 ? ["01-current", "01"] : [`01.${group}-more`, `01.${group}`];
+  return { path: `.planning/phases/${directory}/${id}-${String(index % 100).padStart(2, "0")}-PLAN.md`, content };
+});
+
 describe("resolveWorkspaceRoot", () => {
   it("keeps a snapshot unavailable when the selected workspace cannot be resolved", async () => {
     const service = createBoardService({ resolveWorkspace: async () => null });
@@ -403,17 +410,54 @@ describe("readAllowedInventory", () => {
     } finally { await large.cleanup(); }
   });
 
-  it("preserves the 8 MB snapshot cap across mandatory files, optional checks, and TODOs", async () => {
+  it("reads the current phase first, then newest to oldest, whatever order the directory lists them in", async () => {
+    const workspace = await FixtureWorkspace.create([
+      { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 2: Current\n" },
+      { path: ".planning/STATE.md", content: "---\ncurrent_phase: \"02\"\n---\n" },
+      ...["03-next", "01-first", "999.1-backlog", "10-later", "02-current"].map((directory) => ({ path: `.planning/phases/${directory}/${directory.split("-")[0]}-01-PLAN.md`, content: "# Plan\n" })),
+    ]);
+    try {
+      const inventory = await readAllowedInventory(workspace.root);
+      expect(inventory.artifacts.filter((item) => item.kind === "plan").map((item) => item.phaseId)).toEqual(["2", "999.1", "10", "3", "1"]);
+      await workspace.write(".planning/STATE.md", "## Current Position\n\n**Phase:** 10 (Later) — EXECUTING\n");
+      expect((await readAllowedInventory(workspace.root)).artifacts.filter((item) => item.kind === "plan").map((item) => item.phaseId)).toEqual(["10", "999.1", "3", "2", "1"]);
+    } finally { await workspace.cleanup(); }
+  });
+
+  it("drops the oldest phase evidence first when plans exceed the snapshot budget", async () => {
     const content = "x".repeat(250 * 1024);
+    const fitting = Math.floor(LIMITS.bytesPerSnapshot / content.length);
+    const plans = (directory: string, id: string, count: number) => Array.from({ length: count }, (_, index) => ({ path: `.planning/phases/${directory}/${id}-${String(index).padStart(3, "0")}-PLAN.md`, content }));
+    const newer = Math.floor(fitting / 3);
+    const workspace = await FixtureWorkspace.create([
+      { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 2: Current\n" },
+      { path: ".planning/STATE.md", content: "---\ncurrent_phase: 2\n---\n" },
+      ...plans("01-old", "01", fitting - newer), ...plans("02-current", "02", 3), ...plans("03-newer", "03", newer),
+    ]);
+    try {
+      const inventory = await readAllowedInventory(workspace.root);
+      const read = (phaseId: string) => inventory.artifacts.filter((item) => item.kind === "plan" && item.phaseId === phaseId).length;
+      expect([read("2"), read("3")]).toEqual([3, newer]);
+      expect(read("1")).toBeLessThan(fitting - newer);
+      expect(inventory.problems.filter((problem) => problem.warning === "observation-limited").map((problem) => problem.phaseId)).toEqual(expect.arrayContaining(["1"]));
+      expect(inventory.problems.some((problem) => problem.phaseId === "2" || problem.phaseId === "3")).toBe(false);
+      expect(inventory.limited).toBe(true);
+    } finally { await workspace.cleanup(); }
+  });
+
+  it("preserves the snapshot byte cap across mandatory files, optional checks, and TODOs", async () => {
+    const content = "x".repeat(250 * 1024);
+    // Leave room for one validation file and exactly two of the four TODOs.
+    const plans = Math.floor(LIMITS.bytesPerSnapshot / content.length) - 3;
     const workspace = await FixtureWorkspace.create([
       { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Current\n" },
-      ...Array.from({ length: 29 }, (_, index) => ({ path: `.planning/phases/01-current/01-${String(index).padStart(2, "0")}-PLAN.md`, content })),
+      ...planFiles(plans, content),
       { path: ".planning/phases/01-current/01-VALIDATION.md", content },
       ...Array.from({ length: 4 }, (_, index) => ({ path: `.planning/todos/pending/${index}.md`, content })),
     ]);
     try {
       const inventory = await readAllowedInventory(workspace.root);
-      expect(inventory.artifacts.filter((item) => item.kind === "plan")).toHaveLength(29);
+      expect(inventory.artifacts.filter((item) => item.kind === "plan")).toHaveLength(plans);
       expect(inventory.artifacts.filter((item) => item.kind === "validation")).toHaveLength(1);
       expect(inventory.artifacts.filter((item) => item.kind === "todo")).toHaveLength(2);
       expect(inventory.artifacts.reduce((total, item) => total + item.size, 0)).toBeLessThanOrEqual(LIMITS.bytesPerSnapshot);
@@ -501,15 +545,16 @@ describe("readAllowedInventory debug sessions", () => {
 
   it("keeps its own byte and file budget after phase evidence has used the snapshot budget", async () => {
     const content = "x".repeat(250 * 1024);
+    const plans = Math.floor(LIMITS.bytesPerSnapshot / content.length) + 2;
     const workspace = await FixtureWorkspace.create([
       { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Current\n" },
-      ...Array.from({ length: 33 }, (_, index) => ({ path: `.planning/phases/01-current/01-${String(index).padStart(2, "0")}-PLAN.md`, content })),
+      ...planFiles(plans, content),
       ...Array.from({ length: 13 }, (_, index) => ({ path: `.planning/debug/session-${String(index).padStart(2, "0")}.md`, content: `---\nstatus: investigating\n---\n${content}` })),
     ]);
     try {
       const inventory = await readAllowedInventory(workspace.root);
       expect(inventory.artifacts.reduce((total, item) => total + item.size, 0)).toBeLessThanOrEqual(LIMITS.bytesPerSnapshot);
-      expect(inventory.artifacts.filter((item) => item.kind === "plan").length).toBeLessThan(33);
+      expect(inventory.artifacts.filter((item) => item.kind === "plan").length).toBeLessThan(plans);
       expect(inventory.problems).toContainEqual(expect.objectContaining({ phaseId: "1", warning: "observation-limited" }));
       // Twelve 250 KB sessions fit the 3 MB debug budget; the thirteenth is reported, not silently dropped.
       expect(inventory.debugArtifacts).toHaveLength(12);
