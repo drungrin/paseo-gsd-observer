@@ -15,13 +15,14 @@ const segment = /^[\p{L}\p{M}\p{N}_.+#$%°{}-]+$/u;
 const opaque = /[a-z0-9_+-]{80,}|[0-9a-f]{32,}|\$[({]/i;
 const randomLooking = /^(?=(?:.*\d){2})(?=.*[a-z])(?=.*[A-Z])[A-Za-z0-9+]{20,}$/;
 const ipv4 = /(?:\d{1,3}\.){3}\d{1,3}/;
-const host = /^(?:localhost|(?:[a-z0-9-]+\.)+[a-z]{2,24})$/;
+const host = /^\.?(?:localhost|(?:[a-z0-9-]+\.)+[a-z]{2,24})$/;
 // Case-sensitive: "/Users/ana" and "/home/ana" are homes, while "/users/list" and "/Home/Index" are application routes.
 const systemRoot = /^(?:home|Users|root|tmp|var|etc|opt|usr|bin|sbin|lib|lib64|mnt|media|srv|private|Volumes|proc|dev|run|sys|boot|nix|snap|workspaces?|Library|System|Applications|cygdrive)$/;
 const extensions = "md|mdx|markdown|txt|rst|adoc|json|jsonc|json5|ndjson|ya?ml|toml|ini|cfg|conf|env|lock|csv|tsv|xml|xsd|html?|css|scss|sass|less|svg|png|jpe?g|gif|webp|ico|pdf"
   + "|[mc]?tsx?|[mc]?jsx?|vue|svelte|astro|csx?|[cfv]sproj|vbproj|slnx?|props|targets|razor|cshtml|xaml|axaml|resx|pyi?|ipynb|rb|go|rs|java|kts?|gradle|swift|c|cc|cpp|hpp|h"
   + "|php|sql|prisma|graphql|gql|proto|sh|bash|zsh|fish|ps1|psm1|bat|cmd|tf|tfvars|hcl|http|wasm|patch|diff|snap";
-const fileName = new RegExp(`^(?:[\\p{L}\\p{N}_][\\p{L}\\p{M}\\p{N}_.+-]*\\.(?:${extensions})|\\.[\\p{L}\\p{N}][\\p{L}\\p{M}\\p{N}_.-]*)$`, "iu");
+// A dotfile has one name after its dot, plus at most a known extension (".eslintrc.json"): ".dev.example.com" is a host.
+const fileName = new RegExp(`^(?:[\\p{L}\\p{N}_][\\p{L}\\p{M}\\p{N}_.+-]*\\.(?:${extensions})|\\.[\\p{L}\\p{N}][\\p{L}\\p{M}\\p{N}_-]*(?:\\.(?:${extensions}))?)$`, "iu");
 
 const unwrap = (token: string) => wrapper.exec(token) as RegExpExecArray;
 const pathCore = (token: string) => unwrap(token)[2].replace(lineSuffix, "");

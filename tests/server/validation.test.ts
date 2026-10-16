@@ -174,7 +174,7 @@ describe("current-milestone validation projection", () => {
     expect(ValidationTextSchema(120).safeParse("Coverage 59.1-01/D1 and 17-01/D2").success).toBe(true);
     expect(ValidationTextSchema(120).safeParse("Check db.corp first").success).toBe(false);
     expect(ValidationTextSchema(120).safeParse("Open src/app and shared/safe-text.ts:42 first").success).toBe(true);
-    for (const value of ["Open /home/ana/app first", "Open /Users/ana/app first", "Open ~/app first", "Open ../app first", "Open /workspaces/app first", "Open github.com/org/app first"])
+    for (const value of ["Open /home/ana/app first", "Open /Users/ana/app first", "Open ~/app first", "Open ../app first", "Open /workspaces/app first", "Open github.com/org/app first", "Serve .dev.example.com first"])
       expect(ValidationTextSchema(120).safeParse(value).success).toBe(false);
   });
 

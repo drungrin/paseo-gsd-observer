@@ -20,15 +20,15 @@ describe("display location policy", () => {
       "/workspaces/acme/api", "/workspace/app", "/mnt/c/Users/ana", "/c/Users/ana", "/opt/app", "/home",
       "~/.claude/skills/x.md", "~/", "$HOME/.cache", "${HOME}/x", "%APPDATA%/x", "C:/Users/ana", "C:\\Users\\ana", "\\\\server\\share", "//cdn.example.com/x",
       "../outside/x.md", "../", "a/../b", ".../home/ana", "@/workspaces/acme/.codex/x.md", "@~/x.md", "@../x.md",
-      "https://example.com/docs", "file:///home/ana/x", "github.com/org/repo", "localhost/x", "db.internal:5432/app", "T-192.168.10.4/24", "10.0.0.1/24",
+      "https://example.com/docs", "file:///home/ana/x", "github.com/org/repo", ".dev.example.com/x", "localhost/x", "db.internal:5432/app", "T-192.168.10.4/24", "10.0.0.1/24",
       "/gsd-review-backlog", "/gsd:plan-phase", "src/<sessionId>/x", "R${HOME}/x", "src/$(id)/x", "a//b", "x/y=z", "key/user@example.com",
       `prefix/${"a".repeat(80)}`, "keys/aB3dE5fG7hJ9kL1mN2pQ4rS", "digests/9f86d081884c7d659a2feaa0c55ad015a3bf4f1b", "plain",
     ]) expect(isDisplayablePath(token), token).toBe(false);
   });
 
   it("tells file names from host names by their extension", () => {
-    for (const token of ["safe-text.ts", "ROADMAP.md", "60.1-REVIEWS.md", "Program.cs", "package.json", "test_auth.py", ".env", ".planning", "overview.ts:42", "`dark.css`"]) expect(isFileName(token), token).toBe(true);
-    for (const token of ["db.internal", "api.example.com", "orders.prod.company", "console.log", "Microsoft.NET.Test.Sdk", "e.g", "10.0.0.1", "plain", "db.internal:5432"]) expect(isFileName(token), token).toBe(false);
+    for (const token of ["safe-text.ts", "ROADMAP.md", "60.1-REVIEWS.md", "Program.cs", "package.json", "test_auth.py", ".env", ".planning", ".github", ".eslintrc.json", "overview.ts:42", "`dark.css`"]) expect(isFileName(token), token).toBe(true);
+    for (const token of ["db.internal", "api.example.com", "orders.prod.company", "console.log", "Microsoft.NET.Test.Sdk", "e.g", "10.0.0.1", "plain", "db.internal:5432", ".dev.example.ai", ".example.com"]) expect(isFileName(token), token).toBe(false);
   });
 
   it("reads uppercase .NET framework names as prose, not hosts", () => {
