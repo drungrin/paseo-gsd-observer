@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isDisplayablePath, isFileName, maskPaths, redactPaths } from "../../shared/locations";
+import { isDisplayablePath, isFileName, isTechnologyName, maskPaths, redactPaths } from "../../shared/locations";
 
 describe("display location policy", () => {
   it("shows project paths, word alternatives, reference lists, ratios and application routes", () => {
@@ -29,6 +29,12 @@ describe("display location policy", () => {
   it("tells file names from host names by their extension", () => {
     for (const token of ["safe-text.ts", "ROADMAP.md", "60.1-REVIEWS.md", "Program.cs", "package.json", "test_auth.py", ".env", ".planning", "overview.ts:42", "`dark.css`"]) expect(isFileName(token), token).toBe(true);
     for (const token of ["db.internal", "api.example.com", "orders.prod.company", "console.log", "Microsoft.NET.Test.Sdk", "e.g", "10.0.0.1", "plain", "db.internal:5432"]) expect(isFileName(token), token).toBe(false);
+  });
+
+  it("reads uppercase .NET framework names as prose, not hosts", () => {
+    for (const token of ["ASP.NET", "VB.NET", "ADO.NET", "(ASP.NET),"]) expect(isTechnologyName(token), token).toBe(true);
+    for (const token of ["example.net", "Example.NET", "ASP.NETX", "db.ASP.NET", ".NET"]) expect(isTechnologyName(token), token).toBe(false);
+    expect(maskPaths("Migrar para ASP.NET Core e .NET 9")).toBe("Migrar para PATH Core e PATH 9");
   });
 
   it("masks only displayable locations and redacts every other slash token, keeping surrounding punctuation", () => {

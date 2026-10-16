@@ -93,10 +93,11 @@ function decodePlanTitle(text: string): string | undefined {
     const heading = markedHeading(line, "#");
     if (!heading) continue;
     const withoutPrefix = heading.replace(/^(?:(?:phase|fase)\s+\d+(?:\.\d+)*\s+)?(?:plan|plano)\s+\d+(?:\.\d+)*\s*(?:[:—–-]\s*)?/i, "");
-    const value = withoutPrefix.replace(/\s+/g, " ").trim();
+    // An ATX closing sequence ("# Title ##") is markup; "C#" and "F#" keep their hash.
+    const value = withoutPrefix.replace(/\s+#+$/, "").replace(/\s+/g, " ").trim();
     if (!value || /^(?:plan|plano)$/i.test(value) || value.length > MAX_PLAN_TITLE_LENGTH) return undefined;
     // Slashes may form displayable paths; the overview projection decides which locations are shown.
-    if (!/^[\p{L}\p{N} .,;:!?'"&()+\/—–-]+$/u.test(value)) return undefined;
+    if (!/^[\p{L}\p{N} .,;:!?'"&()+#\/—–-]+$/u.test(value)) return undefined;
     if (/(?:https?:\/\/|[\\]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(value)) return undefined;
     return value;
   }
@@ -111,7 +112,7 @@ function decodePlanTitle(text: string): string | undefined {
 function safePlanText(value: string, maxLength: number): string | undefined {
   const normalized = value.replace(/\*\*/g, "").replace(/`/g, "").replace(/\s+/g, " ").trim();
   if (!normalized || normalized.length > maxLength) return undefined;
-  if (!/^[\p{L}\p{N} .,;:!?"'&()+\/—–-]+$/u.test(normalized)) return undefined;
+  if (!/^[\p{L}\p{N} .,;:!?"'&()+#\/—–-]+$/u.test(normalized)) return undefined;
   if (/(?:https?:\/\/|[\\]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(normalized)) return undefined;
   return normalized;
 }
@@ -124,7 +125,7 @@ function safeObjectiveTitle(value: string): string | undefined {
   const title = normalized.length <= MAX_PLAN_TITLE_LENGTH ? normalized : `${(boundary > 64 ? visible.slice(0, boundary) : visible).trimEnd()}…`;
   if (/(?:https?:\/\/|[\\\\]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(title)) return undefined;
   const parts = title.split("/");
-  if (parts.length > 8 || parts.some((part) => !/^[\p{L}\p{N} \[\]|=.,;:!?"'&()+_→…—–-]+$/u.test(part.trim()))) return undefined;
+  if (parts.length > 8 || parts.some((part) => !/^[\p{L}\p{N} \[\]|=.,;:!?"'&()+#_→…—–-]+$/u.test(part.trim()))) return undefined;
   return title;
 }
 

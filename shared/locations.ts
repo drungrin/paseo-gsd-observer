@@ -35,6 +35,9 @@ export function isFileName(token: string): boolean {
   return core.length <= 128 && fileName.test(core) && !ipv4.test(core) && !opaque.test(core);
 }
 
+/** A .NET framework name ("ASP.NET", "VB.NET", "ADO.NET"): dotted like a host, but an uppercase acronym is never one. */
+export const isTechnologyName = (token: string) => /^[A-Z]{2,5}\.NET$/.test(unwrap(token)[2]);
+
 /** A slash token that stays inside the project: relative paths, word alternatives, reference lists, ratios and application routes. */
 export function isDisplayablePath(token: string): boolean {
   if (!token.includes("/")) return false;
@@ -49,9 +52,9 @@ export function isDisplayablePath(token: string): boolean {
   return !(host.test(segments[0]) && !isFileName(segments[0]));
 }
 
-/** Displayable paths and file names replaced by a neutral word, so prose checks never read them as locations or hosts. */
+/** Displayable paths, file names and framework names replaced by a neutral word, so prose checks never read them as locations or hosts. */
 export const maskPaths = (value: string, placeholder = "PATH") => value.replace(/\S+/g, (token) => {
-  if (!isDisplayablePath(token) && !isFileName(token)) return token;
+  if (!isDisplayablePath(token) && !isFileName(token) && !isTechnologyName(token)) return token;
   const [, lead, , trail] = unwrap(token);
   return `${lead}${placeholder}${trail}`;
 });

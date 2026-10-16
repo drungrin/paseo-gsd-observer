@@ -636,13 +636,15 @@ ${progressTable(`${row("1", "23/23")}\n${row("2", "0/TBD")}`)}
   });
 
   it("titles plans with no heading from an objective whose wording lists items with slashes", () => {
-    const roadmap = "## Phases\n- [ ] Phase 60.1: Records\n## Phase Details\n### Phase 60.1: Records\n- [x] 60.1-19-PLAN.md\n- [x] 60.1-23-PLAN.md\n";
+    const roadmap = "## Phases\n- [ ] Phase 60.1: Records\n## Phase Details\n### Phase 60.1: Records\n- [x] 60.1-19-PLAN.md\n- [x] 60.1-23-PLAN.md\n- [x] 60.1-24-PLAN.md\n";
     const input = inventory(stateFor("60.1"), roadmap);
     input.artifacts.push(
       phaseArtifact("plan", "60.1", "19", "---\nphase: 60.1-records\nplan: \"19\"\nwave: 4\n---\n\n<objective>Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.</objective>\n\n## Ordering\n"),
       phaseArtifact("plan", "60.1", "23", "---\nphase: 60.1-records\nplan: \"23\"\n---\n<objective>\nImplement the local REST/gRPC/GraphQL slice over shared/safe-text.ts and /home/ana/private.\nPurpose: settle the boundary before the gateways.\nOutput: contracts.\n</objective>\n"),
+      phaseArtifact("plan", "60.1", "24", "---\nphase: 60.1-records\nplan: \"24\"\n---\n<objective>\nClose the R1 cause: the reader accepts the format the C# tool really writes.\n\nPurpose: unblock the installed app.\n</objective>\n"),
     );
-    const [first, second] = buildOverview(input).plans.phases[0].entries;
+    const [first, second, third] = buildOverview(input).plans.phases[0].entries;
+    expect(third.title).toBe("Close the R1 cause: the reader accepts the format the C# tool really writes.");
     expect(first).toMatchObject({ title: "Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.",
       objective: "Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.", wave: 4 });
     // The goal stops before GSD's Purpose and Output lines; a home path inside it is omitted, not the whole goal.

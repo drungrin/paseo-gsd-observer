@@ -1,4 +1,4 @@
-import { isDisplayablePath, isFileName, redactPaths } from "../shared/locations.js";
+import { isDisplayablePath, isFileName, isTechnologyName, redactPaths } from "../shared/locations.js";
 import { ipv6, isReferenceList, ValidationTextSchema } from "../shared/validation.js";
 import { safeText } from "./safe-prose.js";
 
@@ -29,16 +29,17 @@ const runners = "npx|pnpx|bunx|uvx|pipx|az|aws|gcloud|oci";
 // included, go with it.
 const toolCommand = new RegExp(`(?<![\\w-])(?:(?:${tools})\\s+(?:--?[a-z][\\w-]*|(?:${subcommands})\\b)|(?:${runners})\\s+[a-z][\\w-]*)(?:\\s+(?:--?[\\w-]+(?:=\\S*)?|[a-z.@][\\w:.@/-]*|\\[omitted\\])){0,4}`, "g");
 
-/** Inline code is shown only as a plain identifier, reference, displayable path or "key: value" pair; anything else may be a command or location. */
+/** Inline code is shown only as a plain identifier ("C#", "C++" included), reference, displayable path or "key: value" pair; anything else may be a command or location. */
 function codeSpan(content: string): string {
   const trimmed = content.trim();
   const tag = /^<\/?([a-z][\w-]*)>$/i.exec(trimmed);
   if (tag) return tag[1];
-  return /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(trimmed) || isReferenceList(trimmed) || isDisplayablePath(trimmed) || isFileName(trimmed) || /^[a-z][\w-]*:\s?[\w-]+$/i.test(trimmed) ? trimmed : "[omitted]";
+  return /^[\p{L}\p{N}][\p{L}\p{N}_-]*(?:#|\+\+)?$/u.test(trimmed) || isReferenceList(trimmed) || isDisplayablePath(trimmed) || isFileName(trimmed) || isTechnologyName(trimmed)
+    || /^[a-z][\w-]*:\s?[\w-]+$/i.test(trimmed) ? trimmed : "[omitted]";
 }
 
 function redactToken(token: string): string {
-  if (isDisplayablePath(token) || isFileName(token) || isReferenceList(token)) return token;
+  if (isDisplayablePath(token) || isFileName(token) || isTechnologyName(token) || isReferenceList(token)) return token;
   const [, lead, core, trail] = /^([("“'‘*_]*)(.*?)([)"”'’,.;:!?*_]*)$/.exec(token) ?? ["", "", token, ""];
   if (abbreviation.test(core)) return token;
   return /[\\/=]/.test(core) || flagToken.test(core) || hostLike.test(core) || ipv4.test(core) || ipv6.test(core) ? `${lead}[omitted]${trail}` : token;

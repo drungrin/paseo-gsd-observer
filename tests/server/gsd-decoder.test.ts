@@ -31,6 +31,15 @@ describe("GSD finite decoders", () => {
     if (unsafe.availability === "available") expect(unsafe.value).not.toHaveProperty("planTitle");
   });
 
+  it("keeps language names with a hash or pluses in plan titles and goals, but not an ATX closing sequence", () => {
+    expect(decodeArtifact(artifact("---\nphase: '2.2'\nplan: '01'\n---\n# Plan 01: Move the C# and F# reader to C++ ##\n"))).toMatchObject({
+      value: { planTitle: "Move the C# and F# reader to C++" },
+    });
+    expect(decodeArtifact(artifact("---\nphase: '2.2'\nplan: '01'\n---\n<objective>\nClose the cause: the C# tool writes the format.\n</objective>\n"))).toMatchObject({
+      value: { planTitle: "Close the cause: the C# tool writes the format.", planGoal: "Close the cause: the C# tool writes the format." },
+    });
+  });
+
   it("uses the bounded objective heading when a GSD plan has no Markdown H1", () => {
     expect(decodeArtifact(artifact("---\nphase: '2.2'\nplan: '01'\n---\n<objective>\nConvergir a suíte/bootstrap per D-01/D-02.\nPurpose: Preserve the declared seam.\n</objective>\n"))).toMatchObject({
       availability: "available",

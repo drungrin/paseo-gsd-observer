@@ -117,6 +117,7 @@ describe("current-milestone validation projection", () => {
     const rows = [
       ["⚠️ MANUAL — accepted risk", { kind: "human", label: "MANUAL", note: "accepted risk" }],
       ["⚠️ PARTIAL — declared limit", { kind: "partial", label: "PARTIAL", note: "declared limit" }],
+      ["❌ red — the `C#`, `F#` and `C++` readers disagree on ASP.NET Core", { kind: "failing", label: "red", note: "the C#, F# and C++ readers disagree on ASP.NET Core" }],
       ["❌ red — Docker cannot resolve `@acme/db`", { kind: "failing", label: "red", note: "Docker cannot resolve @acme/db" }],
       ["❌ red — Docker cannot reach `/var/run/docker.sock`", { kind: "failing", label: "red", note: "Docker cannot reach [omitted]" }],
       ["❌ red — 7/8; parent intent is reused", { kind: "failing", label: "red", note: "7/8; parent intent is reused" }],

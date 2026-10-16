@@ -88,6 +88,11 @@ describe("current-milestone context projection", () => {
     for (const text of ["Check /home/ana/app first.", "Check ~/app first.", "Check ../outside first.", "Check C:/Users/ana first."]) expect(decisions(text)).toBe(false);
   });
 
+  it("keeps language and framework names that look like markup or hosts", () => {
+    const result = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Move the reader to ASP.NET Core in C# and F#, without C++.") }]), roadmap());
+    expect(result.phases[0].decisionGroups[0].decisions[0]).toEqual({ id: "D-01", text: "Move the reader to ASP.NET Core in C# and F#, without C++." });
+  });
+
   it("withholds hostnames with unlisted private suffixes", () => {
     const result = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Inspect orders.prod.company and db.corp before confirmation.") }]), roadmap());
     expect(result.phases[0].decisionCount).toBe(2);
