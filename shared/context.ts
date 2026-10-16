@@ -9,7 +9,13 @@ export const ContextTextSchema = memoizeByLength((max: number) => z.string().max
 const ProseSchema = ContextTextSchema;
 
 const SectionSchema = z.object({ title: ProseSchema(120), lines: z.array(ProseSchema(640)).max(12) }).strict();
-const DecisionGroupSchema = z.object({ title: ProseSchema(120), decisions: z.array(z.object({ id: z.string().regex(/^D-\d{2,3}$/), text: ProseSchema(640) }).strict()).max(32) }).strict();
+/**
+ * A numbered context item: one letter, a number that may be phase-scoped ("D-12.1-01") or lettered ("D-10a"), and optionally
+ * more of them as a range or list ("D-01..D-04", "D-05/D-06", "D-05/06").
+ */
+export const decisionIdPattern = "[A-Z]-\\d+(?:\\.\\d+)*(?:-\\d+)?[a-z]?(?:(?:\\.\\.|\\/)(?:[A-Z]-)?\\d+(?:\\.\\d+)*(?:-\\d+)?[a-z]?)*";
+const DecisionSchema = z.object({ id: z.string().max(64).regex(new RegExp(`^${decisionIdPattern}$`)), title: ProseSchema(240).nullable(), text: ProseSchema(640) }).strict();
+const DecisionGroupSchema = z.object({ title: ProseSchema(120), decisions: z.array(DecisionSchema).max(32) }).strict();
 
 export const BoardContextPhaseSchema = z.object({
   id: z.string().regex(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*$/).max(64),

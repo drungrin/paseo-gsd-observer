@@ -14,7 +14,7 @@ import type { BoardOverview } from "../../shared/overview";
 
 const theme = { colors: { surface0: "#fff", surface1: "#f8fafc", surface2: "#eef2f5", foreground: "#12151c", foregroundMuted: "#626c76", accent: "#316ec4", accentForeground: "#fff", border: "#d8dde4" } };
 const phase = (): BoardContextPhase => ({ id: "59.3", title: "Independent registries", current: true, observation: "observed", gatheredAt: "2026-09-23", recordedStatus: "Ready for planning",
-  boundary: ["Drafts must be confirmed explicitly."], decisionCount: 3, decisionGroups: [{ title: "Lifecycle", decisions: [{ id: "D-01", text: "Drafts can be edited." }, { id: "D-02", text: "Confirmed changes preserve history." }] }],
+  boundary: ["Drafts must be confirmed explicitly."], decisionCount: 3, decisionGroups: [{ title: "Lifecycle", decisions: [{ id: "D-01", title: null, text: "Drafts can be edited." }, { id: "D-02", title: null, text: "Confirmed changes preserve history." }] }],
   discretion: ["Select the storage model."], specifics: ["Show drafts in the list."], deferred: ["Financial reports come later."], referencesObserved: true, amendmentsObserved: true,
   insights: [{ title: "Reusable Assets", lines: ["Existing list components are reusable."] }], sourceSections: [{ title: "Later amendments", lines: ["Review before confirmation."] }], excerptsLimited: true });
 const context = (): BoardContext => ({ availability: "available", limited: true, phases: [
@@ -60,6 +60,18 @@ describe("Context tab", () => {
     expect(sourceControl?.props).toMatchObject({ accessibilityState: { expanded: false }, "aria-expanded": false });
     expect(text(briefing)).not.toContain("Review before confirmation.");
     expect(text(render({ ...selected, props: { ...selected.props, sourceOpen: true } }))).toContain("Review before confirmation.");
+  });
+
+  it("shows a decision title before its wording and sizes the ID column for range and scoped IDs", () => {
+    const data = context();
+    data.phases[1] = { ...data.phases[1], decisionGroups: [{ title: "Ownership", decisions: [
+      { id: "D-01..D-04", title: null, text: "Quantities keep three places." },
+      { id: "D-27", title: "Test data profile", text: "No endpoint accepts the current month." },
+    ] }] };
+    const briefing = render(nodes(ContextView({ state: state(data), theme, onRefresh: vi.fn() })).find((node) => typeof node.type === "function" && node.type.name === "PhaseBriefing")!);
+    expect(text(briefing)).toContain("D-27Test data profile No endpoint accepts the current month.");
+    const idCell = nodes(briefing).find((node) => node.props?.children === "D-01..D-04");
+    expect((idCell?.props?.style as { width?: number }).width).toBeGreaterThanOrEqual(90);
   });
 
   it("distinguishes no file, unreadable content, roadmap unavailable, loading and stale snapshots", () => {

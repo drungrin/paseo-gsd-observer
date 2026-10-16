@@ -13,6 +13,9 @@ function ContextCard({ title, children, theme }: { title: string; children: Reac
   </View>;
 }
 
+/** One ID column per group, wide enough for its longest ID ("D-01..D-04", "D-12.1-01"), so the wording stays aligned. */
+const decisionIdWidth = (group: BoardContextPhase["decisionGroups"][number]) => Math.min(150, Math.max(52, 9 * Math.max(...group.decisions.map((decision) => decision.id.length))));
+
 function LineList({ lines, theme }: { lines: readonly string[]; theme: BoardTheme }) {
   return <View style={{ gap: 8 }}>{lines.map((line, index) => <View key={`${index}:${line.slice(0, 20)}`} style={{ flexDirection: "row", alignItems: "flex-start", gap: 9 }}>
     <Text style={textStyle(theme, true)}>•</Text><Text style={{ ...textStyle(theme), flex: 1, minWidth: 0 }}>{line}</Text>
@@ -37,8 +40,9 @@ function PhaseBriefing({ phase, theme, compact, sourceOpen, onToggleSource }: { 
     <ContextCard title={`Decisions · ${shown} of ${phase.decisionCount} excerpts`} theme={theme}>
       {phase.decisionGroups.filter((group) => group.decisions.length).length ? phase.decisionGroups.filter((group) => group.decisions.length).map((group) => <View key={group.title} style={{ gap: 9, paddingTop: 5 }}>
         <Text style={{ ...textStyle(theme), fontWeight: "600" }}>{group.title}</Text>
-        {group.decisions.map((decision) => <View key={decision.id} style={{ flexDirection: compact ? "column" : "row", gap: compact ? 3 : 12, paddingVertical: 6, borderTopWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
-          <Text style={{ ...textStyle(theme), fontWeight: "600", width: compact ? undefined : 52 }}>{decision.id}</Text><Text style={{ ...textStyle(theme), flex: 1, minWidth: 0 }}>{decision.text}</Text>
+        {group.decisions.map((decision, index) => <View key={`${index}:${decision.id}`} style={{ flexDirection: compact ? "column" : "row", gap: compact ? 3 : 12, paddingVertical: 6, borderTopWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
+          <Text style={{ ...textStyle(theme), fontWeight: "600", width: compact ? undefined : decisionIdWidth(group) }}>{decision.id}</Text>
+          <Text style={{ ...textStyle(theme), flex: 1, minWidth: 0 }}>{decision.title && <Text style={{ fontWeight: "600" }}>{decision.title} </Text>}{decision.text}</Text>
         </View>)}
       </View>) : <Text style={textStyle(theme, true)}>No numbered decisions could be safely extracted.</Text>}
       <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Recorded context decisions are not independent verification of implementation.</Text>
