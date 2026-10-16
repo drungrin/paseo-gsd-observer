@@ -131,13 +131,14 @@ describe("project-wide TODO register", () => {
     expect(result.items.find((item) => item.directory === "pending")).toMatchObject({ lifecycle: "pending", recordedStatus: "done", statusConflict: true, severity: "high", priority: "medium", phaseId: null });
   });
 
-  it("never publishes metadata paths, commands, credentials, filenames or unsafe body text", () => {
+  it("never publishes metadata fields, commands, credentials, filenames or unsafe body text", () => {
     const text = `---\ncreated: 2026-08-20\ntitle: Investigate src/private/config.ts and token: ghp_abcdefghijklmnopqrstuvwxyz012345\narea: src/private/config.ts\nseverity: urgent\npriority: low\nsource: internal/users/jane.md\nresolves_phase: ../../secrets\n---\n# Good fallback heading\n\n## Problem\n\nRun npm install secret-package at http://localhost:8000 before changing src/private/config.ts.\n\n## Solution\n\nBearer abcdefghijklmnopqrstuvwxyz123456 secret: OPEN-SESAME\n`;
     const result = project(file("backlog", "ghp_abcdefghijklmnopqrstuvwxyz012345.md", text));
     expect(BoardTodosSchema.safeParse(result).success).toBe(true);
     expect(result.items[0]).toMatchObject({ title: "Good fallback heading", area: null, severity: null, priority: "low", phaseId: null });
     const output = JSON.stringify(result);
-    for (const canary of ["src/private", "config.ts", "localhost", "8000", "ghp_", "OPEN-SESAME", "internal/users", "npm install", "../../secrets"]) expect(output).not.toContain(canary);
+    for (const canary of ["localhost", "8000", "ghp_", "OPEN-SESAME", "internal/users", "npm install", "../../secrets"]) expect(output).not.toContain(canary);
+    expect(result.items[0].summary).toBe("Run [omitted] changing src/private/config.ts.");
   });
 
   it("isolates malformed, oversized and unreadable items without failing the board", () => {

@@ -59,7 +59,8 @@ All filesystem access stays in the Paseo server process. Before reading, the plu
 
 - Individual artifact reads are capped at **256 KiB**; a snapshot has an **8 MiB** budget for planning evidence plus a separate **3 MiB** budget for debug sessions.
 - Symlinks, file replacement, oversized input, malformed content, unknown formats, and paths outside the trusted root become explicit warnings or unavailable evidence.
-- The client receives validated IDs, labels, counts, warnings, and evidence categories—not raw artifact bodies, paths, logs, prompts, arguments, tokens, or secrets.
+- The client receives validated IDs, labels, counts, warnings, and evidence categories—not raw artifact bodies, absolute filesystem paths, logs, prompts, arguments, tokens, or secrets.
+- Project-relative paths such as `shared/safe-text.ts` are shown as written. Absolute, home, drive, and parent-escaping paths, links, and any text naming the workspace root are shown as `[omitted]`.
 - Completion is shown only when allowlisted evidence establishes it. The observer never infers lifecycle state from a process, log, timestamp, or absent file.
 
 The plugin adds no HTTP service, database, telemetry, terminal, agent action, or write access to GSD artifacts.

@@ -163,7 +163,7 @@ function PhaseValidation({ phase, theme, compact }: { phase: BoardValidationPhas
       <Text role="heading" style={{ ...textStyle(theme), fontSize: 19, lineHeight: 25, fontWeight: "600" }}>Phase {phase.id} · {phase.title}</Text>
       <Text style={smallStyle(theme)}>VALIDATION.md observed{phase.createdAt ? ` · Created ${phase.createdAt}` : ""}{phase.updatedAt ? ` · Last updated ${phase.updatedAt}` : ""}</Text>
       <Text style={smallStyle(theme)}>Statuses are recorded in the document; they are not a live test run.</Text>
-      {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, file locations and host-like text are shown as [omitted].</Text>}
+      {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, absolute paths, links and host-like text are shown as [omitted].</Text>}
       {phase.excerptsLimited && <Text role="alert" style={smallStyle(theme)}>Some validation text could not be safely extracted or was shortened.</Text>}
     </View>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>

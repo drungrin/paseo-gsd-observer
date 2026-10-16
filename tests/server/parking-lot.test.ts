@@ -48,7 +48,7 @@ describe("Root-roadmap parking lot", () => {
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({ id: "999.1", title: "Suporte a várias versões do runtime", disposition: "parked", recordedLabel: "BACKLOG", requirements: "TBD", plans: "0 plans", checklist: null });
     expect(JSON.stringify(result)).not.toContain(hash);
-    expect(JSON.stringify(result)).not.toContain("runtime-versions");
+    expect(result.items[0].goal).toBe("Ampliar suporte após a milestone com amostras adicionais e [omitted] em runtime-versions/runtime-2.6.war.");
     expect(JSON.stringify(result)).not.toContain("gsd-review-backlog");
     expect(BoardParkingLotSchema.safeParse(result).success).toBe(true);
   });
@@ -164,17 +164,18 @@ describe("Root-roadmap parking lot", () => {
     expect(note.items[0].disposition).toBe("reconciliation");
   });
 
-  it("masks relative slash tokens and underscore-adjacent digests in title and Goal, tracking withheld excerpts", () => {
+  it("keeps project paths but masks underscore-adjacent digests in title and Goal, tracking withheld excerpts", () => {
     const digest = "a".repeat(40);
     const longDigest = "b".repeat(64);
     const result = project(`## Backlog\n### Phase 999.1: Review reference_${digest} and workspace/private\n**Goal:** Review workspace/private and marker_${longDigest} before release; retain BILL-01/02.`);
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain(digest);
     expect(serialized).not.toContain(longDigest);
-    expect(serialized).not.toContain("workspace/private");
+    expect(result.items[0]).toMatchObject({ title: "Review reference_[omitted] and workspace/private", goal: "Review workspace/private and marker_[omitted] before release; retain BILL-01/02." });
     expect(result.items[0].excerptsLimited).toBe(true);
     expect(BoardParkingLotSchema.safeParse(result).success).toBe(true);
-    expect(ParkingLotItemSchema.safeParse({ ...result.items[0], title: "workspace/private" }).success).toBe(false);
+    expect(ParkingLotItemSchema.safeParse({ ...result.items[0], title: "workspace/private" }).success).toBe(true);
+    expect(ParkingLotItemSchema.safeParse({ ...result.items[0], title: "/workspace/private" }).success).toBe(false);
   });
 
   it("enforces strict bounded DTO fields and privacy even for caller-supplied projections", () => {

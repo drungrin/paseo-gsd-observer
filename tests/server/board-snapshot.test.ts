@@ -99,7 +99,7 @@ describe("buildBoardSnapshot", () => {
     expect(BoardSnapshotSchema.safeParse(snapshot).success).toBe(true);
     expect(snapshot.overview?.uat.phases.map((phase) => [phase.id, phase.observation])).toEqual([["59.1", "observed"], ["59.3", "not_observed"]]);
     expect(snapshot.overview?.uat.phases[0]).toMatchObject({ recordedStatus: "partial", results: { issue: 1 }, summary: { mismatches: [] }, tests: [{ severity: { level: "blocker" }, history: true }] });
-    expect(JSON.stringify(snapshot.overview?.uat)).not.toMatch(/localhost|5043|Panel\.razor|src\//);
+    expect(JSON.stringify(snapshot.overview?.uat)).not.toMatch(/localhost|5043/);
     await workspace.cleanup();
   });
 
@@ -114,7 +114,7 @@ describe("buildBoardSnapshot", () => {
     expect(snapshot.overview?.verification.phases.map((phase) => [phase.id, phase.observation])).toEqual([["59.1", "observed"], ["59.3", "not_observed"]]);
     expect(snapshot.overview?.verification.phases[0]).toMatchObject({ recordedStatus: "passed", bodyStatus: "human_needed", score: { verified: 3, total: 4 }, openHumanCount: 1,
       truthTables: [{ rowCount: 2, counts: { verified: 1, failed: 1 } }], checks: [{ family: "behavior", counts: { failed: 1 } }] });
-    expect(JSON.stringify(snapshot.overview?.verification)).not.toMatch(/localhost|5043|Panel\.razor|src\/|pnpm/);
+    expect(JSON.stringify(snapshot.overview?.verification)).not.toMatch(/localhost|5043|pnpm/);
     await workspace.cleanup();
   });
 
@@ -212,6 +212,21 @@ describe("buildBoardSnapshot", () => {
     expect(BoardSnapshotSchema.safeParse(snapshot).success).toBe(true);
     expect(snapshot.overview?.roadmap.availability).toBe("unavailable");
     expect(snapshot.overview?.parkingLot).toMatchObject({ availability: "unavailable", section: "unavailable", items: [] });
+    await workspace.cleanup();
+  });
+
+  it("omits any token naming the real workspace root, even where location rules would read it as a project path", async () => {
+    const workspace = await FixtureWorkspace.create([
+      { path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Safe\n## Phase Details\n### Phase 1: Safe\n- [ ] 1-01-PLAN.md\n" },
+      { path: ".planning/STATE.md", content: "Phase: 1\n" },
+    ]);
+    const inventory = await readAllowedInventory(workspace.root);
+    const relativeRoot = inventory.root!.replace(/^\/+/, "");
+    await workspace.write(".planning/phases/01-safe/01-01-PLAN.md", `---\nphase: '1'\nplan: '01'\n---\n<objective>Compare ${relativeRoot}/src/app.ts with shared/safe-text.ts.</objective>\n`);
+    const snapshot = buildBoardSnapshot({ workspaceId: "test", inventory: await readAllowedInventory(workspace.root), observedAt: "2026-09-26T00:00:00Z" });
+    expect(BoardSnapshotSchema.safeParse(snapshot).success).toBe(true);
+    expect(snapshot.overview?.plans.phases[0].entries[0].objective).toBe("Compare [omitted] with shared/safe-text.ts.");
+    expect(JSON.stringify(snapshot)).not.toContain(relativeRoot);
     await workspace.cleanup();
   });
 });

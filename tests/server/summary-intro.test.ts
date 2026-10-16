@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { summaryIntro } from "../../server/summary-intro";
-import { PathFreeTextSchema } from "../../shared/validation";
+import { ValidationTextSchema } from "../../shared/validation";
 import type { AllowedArtifact } from "../../server/allowed-reader";
 
 const artifact = (text: string): AllowedArtifact => {
@@ -20,7 +20,7 @@ describe("summary introduction", () => {
 This later section claims everything passed.
 `));
     expect(result).toEqual({ text: "Os registros ganham ciclo de vida explícito e encerramento auditável, preservando o histórico já confirmado sem reescrita retroativa.", limited: false });
-    expect(PathFreeTextSchema(640).safeParse(result.text).success).toBe(true);
+    expect(ValidationTextSchema(640).safeParse(result.text).success).toBe(true);
   });
 
   it("accepts a plain intro and ignores frontmatter comments, fenced headings, tables, lists and later prose", () => {
@@ -70,7 +70,7 @@ The later claim must not appear.
     const serialized = JSON.stringify(result);
     for (const secret of ["/home", "db.internal", "npm run test", "abcdefghijklmnopqrstu", "1b4e28ba", "8961c667", "<b>"]) expect(serialized).not.toContain(secret);
     expect(result).toMatchObject({ limited: true });
-    if (result.text) expect(PathFreeTextSchema(640).safeParse(result.text).success).toBe(true);
+    if (result.text) expect(ValidationTextSchema(640).safeParse(result.text).success).toBe(true);
   });
 
   it("shortens only at a safe sentence boundary, never asserting a truncated outcome", () => {

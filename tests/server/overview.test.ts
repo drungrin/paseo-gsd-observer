@@ -521,7 +521,7 @@ ${progressTable(`${row("1", "23/23")}\n${row("2", "0/TBD")}`)}
   });
 
   it.each([
-    "/home/private/privacy-canary", "C:\\private\\privacy-canary", ".planning/private/privacy-canary.md", "src/private-canary.txt",
+    "/home/private/privacy-canary", "C:\\private\\privacy-canary", "/Users/private/privacy-canary", "~/privacy-canary", "../outside/privacy-canary", "$HOME/privacy-canary",
     "token: privacy-credential-canary", "Bearer privacy-credential-canary", "AKIAABCDEFGHIJKLMNOP", "ghp_abcdefghijklmno0123456789",
     "curl https://private.invalid/command-canary", "npm run privacy-command-canary", "node privacy-command-canary.js", "\u0000privacy-control-canary", "privacy\u202econtrol-canary",
   ])("does not expose unsafe display strings %j", (canary) => {
@@ -635,11 +635,28 @@ ${progressTable(`${row("1", "23/23")}\n${row("2", "0/TBD")}`)}
     expect(buildOverview(noRoadmap).plans.availability).toBe("unavailable");
   });
 
+  it("titles plans with no heading from an objective whose wording lists items with slashes", () => {
+    const roadmap = "## Phases\n- [ ] Phase 60.1: Records\n## Phase Details\n### Phase 60.1: Records\n- [x] 60.1-19-PLAN.md\n- [x] 60.1-23-PLAN.md\n";
+    const input = inventory(stateFor("60.1"), roadmap);
+    input.artifacts.push(
+      phaseArtifact("plan", "60.1", "19", "---\nphase: 60.1-records\nplan: \"19\"\nwave: 4\n---\n\n<objective>Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.</objective>\n\n## Ordering\n"),
+      phaseArtifact("plan", "60.1", "23", "---\nphase: 60.1-records\nplan: \"23\"\n---\n<objective>\nImplement the local REST/gRPC/GraphQL slice over shared/safe-text.ts and /home/ana/private.\nPurpose: settle the boundary before the gateways.\nOutput: contracts.\n</objective>\n"),
+    );
+    const [first, second] = buildOverview(input).plans.phases[0].entries;
+    expect(first).toMatchObject({ title: "Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.",
+      objective: "Support the first slice, per D-01/D-04/D-21: wire the read/write consumers.", wave: 4 });
+    // The goal stops before GSD's Purpose and Output lines; a home path inside it is omitted, not the whole goal.
+    expect(second).toMatchObject({ title: "Implement the local REST/gRPC/GraphQL slice over shared/safe-text.ts and [omitted].",
+      objective: "Implement the local REST/gRPC/GraphQL slice over shared/safe-text.ts and [omitted]." });
+    expect(JSON.stringify(buildOverview(input))).not.toMatch(/\/home\/ana|settle the boundary/);
+    expect(BoardOverviewSchema.safeParse(buildOverview(input)).success).toBe(true);
+  });
+
   it("reads only the bounded first line of an inline plan objective", () => {
     const roadmap = "## Phases\n- [ ] Phase 59.3: Browser certification\n## Phase Details\n### Phase 59.3: Browser certification\n- [ ] 59.3-18-PLAN.md\n";
     const input = inventory(stateFor("59.3"), roadmap);
     input.artifacts.push(phaseArtifact("plan", "59.3", "18", "---\nphase: '59.3'\nplan: '18'\nwave: 15\n---\n<objective>Certify browser/Postgres workflows. Purpose: only the goal is displayed. Output: private metadata.</objective>\n"));
-    expect(buildOverview(input).plans.phases[0].entries[0]).toMatchObject({ id: "59.3-18", objective: "Certify [omitted] workflows.", wave: 15 });
+    expect(buildOverview(input).plans.phases[0].entries[0]).toMatchObject({ id: "59.3-18", objective: "Certify browser/Postgres workflows.", wave: 15 });
     const plan = input.artifacts.at(-1)!;
     const crlf = new TextDecoder().decode(plan.bytes).replace(/\n/g, "\r\n");
     plan.bytes = new TextEncoder().encode(crlf);
@@ -648,12 +665,11 @@ ${progressTable(`${row("1", "23/23")}\n${row("2", "0/TBD")}`)}
     const relativeLocation = "---\nphase: '59.3'\nplan: '18'\n---\n<objective>Inspect config/credentials before launch.</objective>\n";
     plan.bytes = new TextEncoder().encode(relativeLocation);
     plan.size = plan.bytes.byteLength;
-    expect(buildOverview(input).plans.phases[0].entries[0].objective).toBe("Inspect [omitted] before launch.");
-    expect(JSON.stringify(buildOverview(input).plans)).not.toContain("config/credentials");
+    expect(buildOverview(input).plans.phases[0].entries[0].objective).toBe("Inspect config/credentials before launch.");
     const unsafe = "---\nphase: '59.3'\nplan: '18'\n---\n<objective>Read /home/private/privacy-canary to discover credentials.</objective>\n";
     plan.bytes = new TextEncoder().encode(unsafe);
     plan.size = plan.bytes.byteLength;
-    expect(buildOverview(input).plans.phases[0].entries[0].objective).toBeNull();
+    expect(buildOverview(input).plans.phases[0].entries[0].objective).toBe("Read [omitted] to discover credentials.");
     expect(JSON.stringify(buildOverview(input).plans)).not.toContain("privacy-canary");
   });
 
@@ -664,10 +680,12 @@ ${progressTable(`${row("1", "23/23")}\n${row("2", "0/TBD")}`)}
     for (const bad of [
       { ...entry, raw: "private/path" }, { ...entry, number: "01" }, { ...entry, id: "02-1" },
       { ...entry, title: "/home/private" }, { ...entry, title: "x".repeat(161) },
-      { ...entry, objective: "x".repeat(641) }, { ...entry, title: "config/credentials" }, { ...entry, objective: "config/credentials" },
+      { ...entry, objective: "x".repeat(641) }, { ...entry, title: "/etc/credentials" }, { ...entry, objective: "~/credentials" }, { ...entry, title: "../outside/notes" },
       { ...entry, wave: -1 }, { ...entry, roadmapChecked: "yes" }, { ...entry, roadmapConflict: true, roadmapChecked: true },
     ]) expect(BoardOverviewSchema.safeParse(mutate(bad)).success).toBe(false);
     expect(BoardOverviewSchema.safeParse({ ...valid, plans: { ...valid.plans, raw: "private/path" } }).success).toBe(false);
+    for (const good of [{ ...entry, title: "Fix shared/safe-text.ts per D-01/D-04" }, { ...entry, objective: "Route /v1/auth via REST/gRPC/GraphQL" }])
+      expect(BoardOverviewSchema.safeParse(mutate(good)).success).toBe(true);
   });
 
   it("caps phase output and does not present a partial headline as complete", () => {

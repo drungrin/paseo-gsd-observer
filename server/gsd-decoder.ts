@@ -95,8 +95,9 @@ function decodePlanTitle(text: string): string | undefined {
     const withoutPrefix = heading.replace(/^(?:(?:phase|fase)\s+\d+(?:\.\d+)*\s+)?(?:plan|plano)\s+\d+(?:\.\d+)*\s*(?:[:—–-]\s*)?/i, "");
     const value = withoutPrefix.replace(/\s+/g, " ").trim();
     if (!value || /^(?:plan|plano)$/i.test(value) || value.length > MAX_PLAN_TITLE_LENGTH) return undefined;
-    if (!/^[\p{L}\p{N} .,;:!?'"&()+—–-]+$/u.test(value)) return undefined;
-    if (/(?:https?:\/\/|[\\/]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(value)) return undefined;
+    // Slashes may form displayable paths; the overview projection decides which locations are shown.
+    if (!/^[\p{L}\p{N} .,;:!?'"&()+\/—–-]+$/u.test(value)) return undefined;
+    if (/(?:https?:\/\/|[\\]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(value)) return undefined;
     return value;
   }
   const objective = planBlock(normalized, "objective");
@@ -110,8 +111,8 @@ function decodePlanTitle(text: string): string | undefined {
 function safePlanText(value: string, maxLength: number): string | undefined {
   const normalized = value.replace(/\*\*/g, "").replace(/`/g, "").replace(/\s+/g, " ").trim();
   if (!normalized || normalized.length > maxLength) return undefined;
-  if (!/^[\p{L}\p{N} .,;:!?"'&()+—–-]+$/u.test(normalized)) return undefined;
-  if (/(?:https?:\/\/|[\\/]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(normalized)) return undefined;
+  if (!/^[\p{L}\p{N} .,;:!?"'&()+\/—–-]+$/u.test(normalized)) return undefined;
+  if (/(?:https?:\/\/|[\\]|\b(?:secret|token|password|api[_-]?key|prompt|authorization|bearer)\b|AKIA[0-9A-Z]{16})/i.test(normalized)) return undefined;
   return normalized;
 }
 
@@ -138,7 +139,8 @@ function decodePlanGoal(text: string): string | undefined {
   const story = normalized.slice(0, 8_192).split("\n").find((line) => /^\s*\*\*As a\*\*/i.test(line));
   if (story) return safePlanText(story, MAX_PLAN_GOAL_LENGTH);
   const objective = planBlock(normalized, "objective");
-  const firstParagraph = objective?.split(/\n\s*\n/)[0];
+  // The goal statement only: GSD's "Purpose:" and "Output:" lines follow it, often in the same paragraph.
+  const firstParagraph = objective?.split(/\n\s*\n/)[0].split(/\s+(?:Purpose|Output):/i)[0];
   return firstParagraph ? safePlanText(firstParagraph, MAX_PLAN_GOAL_LENGTH) : undefined;
 }
 

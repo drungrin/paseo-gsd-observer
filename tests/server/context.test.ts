@@ -63,7 +63,7 @@ describe("current-milestone context projection", () => {
   });
 
   it("withholds unsafe prose while retaining decision IDs and honest counts", () => {
-    const result = buildContext(inventory([{ name: "CONTEXT.md", text: document("Read /home/operator/private.txt then run curl https://api.example.com") }]), roadmap());
+    const result = buildContext(inventory([{ name: "CONTEXT.md", text: document("Run npm install from https://api.example.com as operator") }]), roadmap());
     const phase = result.phases[0];
     expect(phase.observation).toBe("observed");
     expect(phase.decisionCount).toBe(2);
@@ -72,14 +72,20 @@ describe("current-milestone context projection", () => {
     expect(JSON.stringify(result)).not.toMatch(/operator|api\.example/);
   });
 
-  it("keeps plain word alternatives readable while withholding location-like slash tokens", () => {
+  it("keeps word alternatives and project paths readable while omitting machine locations", () => {
     const readable = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Rascunho editável/excluível; D-10/D-11 exigem reset/commit/push manual.") }]), roadmap()).phases[0];
     expect(readable.decisionGroups[0].decisions[0].text).toBe("Rascunho editável/excluível; D-10/D-11 exigem reset/commit/push manual.");
     const located = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Revise docs/guide.md e config/secrets antes de confirmar.") }]), roadmap()).phases[0];
-    expect(located.decisionGroups[0].decisions.map((decision) => decision.id)).toEqual(["D-02"]);
+    expect(located.decisionGroups[0].decisions[0].text).toBe("Revise docs/guide.md e config/secrets antes de confirmar.");
+    const absolute = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Read /home/operator/private.txt then run curl https://api.example.com") }]), roadmap());
+    expect(absolute.phases[0].decisionGroups[0].decisions[0].text).toBe("Read [omitted] then run curl [omitted]");
+    expect(JSON.stringify(absolute)).not.toMatch(/operator|api\.example/);
+    // A fraction slash only imitates a separator, so the token it sits in is never a displayable path.
     const partial = buildContext(inventory([{ name: "59.3-CONTEXT.md", text: document("Use ContractRegistry/Legacy⁄Entry com config/secrets.") }]), roadmap()).phases[0];
-    expect(partial.decisionGroups[0].decisions[0].text).toBe("Use [omitted] com [omitted]");
-    expect(BoardContextSchema.shape.phases.element.shape.decisionGroups.safeParse([{ title: "Lifecycle", decisions: [{ id: "D-01", text: "Check src/app first." }] }]).success).toBe(false);
+    expect(partial.decisionGroups[0].decisions[0].text).toBe("Use [omitted] com config/secrets.");
+    const decisions = (text: string) => BoardContextSchema.shape.phases.element.shape.decisionGroups.safeParse([{ title: "Lifecycle", decisions: [{ id: "D-01", text }] }]).success;
+    expect(decisions("Check src/app first.")).toBe(true);
+    for (const text of ["Check /home/ana/app first.", "Check ~/app first.", "Check ../outside first.", "Check C:/Users/ana first."]) expect(decisions(text)).toBe(false);
   });
 
   it("withholds hostnames with unlisted private suffixes", () => {

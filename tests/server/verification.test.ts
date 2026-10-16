@@ -181,7 +181,7 @@ describe("current-milestone verification projection", () => {
     expect(result.humanChecks.map((check) => [check.state, check.resolvedAt, check.resolution])).toEqual([["open", null, null], ["resolved", "2026-09-02", "RESOLVED on the device; the reading passed."]]);
     expect(result.behaviorItems[0]).toEqual({ truth: "A dead session is invalidated in the cache.", test: "Kill the adapter mid-session and send a new prompt.", expected: "A new adapter starts.", whyHuman: "Needs a real child process." });
     expect(result.overrides).toEqual([{ mustHave: "Every mutation can be repeated without duplicate effects.", reason: "Waived for the dated cut.", acceptedAt: "2026-08-29" }]);
-    expect(JSON.stringify(report)).not.toMatch(/jordan|hunter2|localhost|Panel\.razor|playwright|sha256/);
+    expect(JSON.stringify(report)).not.toMatch(/jordan|hunter2|localhost|playwright|sha256/);
   });
 
   it("classifies truth rows by their recorded words and keeps evidence only where it is safe", () => {
@@ -190,7 +190,7 @@ describe("current-milestone verification projection", () => {
     expect(truths.rowCount).toBe(7);
     expect(truths.rows.map((row) => row.status?.kind)).toEqual(["verified", "failed", "unverified", "override", "partial", "pending", "uncertain"]);
     expect(truths.counts).toMatchObject({ verified: 1, failed: 1, unverified: 1, override: 1, partial: 1, pending: 1, uncertain: 1 });
-    expect(truths.rows[1].evidence).toBe("[omitted] still red at [omitted]");
+    expect(truths.rows[1].evidence).toBe("[omitted] still red at src/Help/Panel.razor");
     expect(truths.rows[5].status).toEqual({ kind: "pending", label: "PENDING", note: "human checkpoint, by design" });
     // "Bearer" in prose is not a credential; a Bearer token still is.
     expect(truths.rows[6].text).toBe("Tokens are exigidos em emissão, Bearer e renovação");
@@ -205,14 +205,14 @@ describe("current-milestone verification projection", () => {
     const { checks } = phase(document);
     expect(checks.map((check) => [check.family, check.rowCount, check.listed])).toEqual([["artifacts", 2, "attention"], ["behavior", 2, "attention"], ["requirements", 2, "all"], ["antipatterns", 3, "attention"]]);
     expect(checks[0].counts).toMatchObject({ verified: 1, failed: 1 });
-    expect(checks[0].rows).toEqual([{ key: "[omitted]", status: { kind: "failed", label: "✗ STUB", note: null }, severity: null, detail: "POST returns placeholder", aligned: true }]);
+    expect(checks[0].rows).toEqual([{ key: "src/app/api/chat/route.ts", status: { kind: "failed", label: "✗ STUB", note: null }, severity: null, detail: "POST returns placeholder", aligned: true }]);
     expect(checks[1].rows).toEqual([{ key: "Help closes", status: { kind: "failed", label: "✗ FAIL", note: null }, severity: null, detail: "exit 1", aligned: true }]);
     // Full listings put rows needing attention first.
     expect(checks[2].rows.map((row) => [row.key, row.status?.kind, row.detail])).toEqual([["HELP-02", "human", "Needs a person"], ["HELP-01", "verified", null]]);
     expect(checks[3]).toMatchObject({ statusRecorded: false, severities: { blocker: 1, warning: 1, info: 1, other: 0 } });
     // Dotted names read as locations, so "console.log" is withheld; info-level findings are counted, not listed.
     expect(checks[3].rows.map((row) => [row.key, row.severity])).toEqual([["TODO implement", "blocker"], ["[omitted]", "warning"]]);
-    expect(JSON.stringify(checks)).not.toMatch(/npx|chromium|route\.ts/);
+    expect(JSON.stringify(checks)).not.toMatch(/npx|chromium/);
   });
 
   it("separates dated sections written after the truth table, the human note, the gaps summary and other sections", () => {
@@ -348,15 +348,16 @@ describe("verification projection hardening", () => {
   });
 
   it("withholds letters-only Bearer tokens and commands run through script runners or cloud CLIs", () => {
-    const [first, second, third, fourth] = phase(truths([
+    const [first, second, third, fourth, fifth] = phase(truths([
       "| 1 | Use Bearer AbCdEfGhIjKlMnOpQrStUv here | ✓ VERIFIED | e |",
       "| 2 | Rodou pnpm vitest run e passou | ✓ VERIFIED | e |",
       "| 3 | Executed az aks get-credentials first | ✓ VERIFIED | e |",
       "| 4 | Ran npx playwright test help first | ✓ VERIFIED | e |",
+      "| 5 | Ran pnpm vitest run tests/server/x.test.ts | ✓ VERIFIED | e |",
     ].join("\n"))).truthTables[0].rows.map((row) => row.text);
     expect(first).toBeNull();
-    // A command's next few words go with it, as elsewhere in the board.
-    expect([second, third, fourth]).toEqual(["Rodou [omitted]", "Executed [omitted]", "Ran [omitted]"]);
+    // A command's next few words go with it, as elsewhere in the board, project paths included.
+    expect([second, third, fourth, fifth]).toEqual(["Rodou [omitted]", "Executed [omitted]", "Ran [omitted]", "Ran [omitted]"]);
   });
 
   it("reads a body status line that starts with a mark", () => {

@@ -199,7 +199,7 @@ function PhaseVerification({ phase, uat, theme, compact, isOpen, onToggle }: { p
       <Text role="heading" style={{ ...textStyle(theme), fontSize: 19, lineHeight: 25, fontWeight: "600" }}>Phase {phase.id} · {phase.title}</Text>
       <Text style={smallStyle(theme)}>VERIFICATION.md observed{phase.verifiedAt ? ` · Verified ${phase.verifiedAt}` : ""}{phase.disposedAt ? ` · Disposed ${phase.disposedAt}` : ""}</Text>
       <Text style={smallStyle(theme)}>Results are recorded in the report; they are not a live check.</Text>
-      {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, file locations and host-like text are shown as [omitted].</Text>}
+      {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, absolute paths, links and host-like text are shown as [omitted].</Text>}
       {phase.excerptsLimited && <Text role="alert" style={smallStyle(theme)}>Some verification text could not be safely extracted or was shortened.</Text>}
     </View>
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>

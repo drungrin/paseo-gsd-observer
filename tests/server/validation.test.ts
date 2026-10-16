@@ -88,7 +88,7 @@ describe("current-milestone validation projection", () => {
     expect(result.phases[0].sections).toContain("Source Audit da revisão");
   });
 
-  it("keeps the file's own columns, hides command columns and withholds locations, hosts and commands", () => {
+  it("keeps the file's own columns, hides command columns and withholds hosts and commands", () => {
     const item = phase(document());
     const [map, manual] = item.tables;
     expect(map).toMatchObject({ title: "Per-Task Verification Map", role: "verification", keyLabel: "Task ID", statusLabel: "Status", hiddenColumns: ["Automated Command"], rowCount: 2, irregularRows: 0,
@@ -104,12 +104,12 @@ describe("current-milestone validation projection", () => {
       { label: "Estimated runtime", value: "under 60 s for focused tests", withheld: null },
     ]);
     const json = JSON.stringify(item);
-    expect(json).not.toMatch(/dotnet|pnpm|csproj|tests\/|orders\.prod|Microsoft\.NET|--filter/);
+    expect(json).not.toMatch(/dotnet|pnpm|csproj|orders\.prod|Microsoft\.NET|--filter/);
   });
 
   it("reads checklists with wrapped approval text and counts withheld open items", () => {
     const item = phase(document());
-    expect(item.wave0).toEqual({ done: 1, total: 2, open: ["Add lifecycle tests in [omitted] before implementation."], note: null });
+    expect(item.wave0).toEqual({ done: 1, total: 2, open: ["Add lifecycle tests in tests/Billing.Tests/Lifecycle/ before implementation."], note: null });
     expect(item.signOff).toEqual({ done: 1, total: 3, open: ["All tasks have automated verify or Wave 0 dependencies", "nyquist_compliant: true set in frontmatter"], note: "pending until the first execution wave records evidence." });
   });
 
@@ -117,7 +117,8 @@ describe("current-milestone validation projection", () => {
     const rows = [
       ["⚠️ MANUAL — accepted risk", { kind: "human", label: "MANUAL", note: "accepted risk" }],
       ["⚠️ PARTIAL — declared limit", { kind: "partial", label: "PARTIAL", note: "declared limit" }],
-      ["❌ red — Docker cannot resolve `@acme/db`", { kind: "failing", label: "red", note: "Docker cannot resolve [omitted]" }],
+      ["❌ red — Docker cannot resolve `@acme/db`", { kind: "failing", label: "red", note: "Docker cannot resolve @acme/db" }],
+      ["❌ red — Docker cannot reach `/var/run/docker.sock`", { kind: "failing", label: "red", note: "Docker cannot reach [omitted]" }],
       ["❌ red — 7/8; parent intent is reused", { kind: "failing", label: "red", note: "7/8; parent intent is reused" }],
       ["✅ verde + manual", { kind: "passing", label: "verde", note: "manual" }],
       ["green — SUMMARY pass evidence", { kind: "passing", label: "green", note: "SUMMARY pass evidence" }],
@@ -166,12 +167,14 @@ describe("current-milestone validation projection", () => {
     expect(BoardValidationSchema.shape.phases.element.safeParse(item).success).toBe(true);
   });
 
-  it("accepts identifier lists but rejects hosts and locations in the shared schema", () => {
+  it("accepts identifier lists and project paths but rejects hosts and machine locations in the shared schema", () => {
     expect(ValidationTextSchema(120).safeParse("BILL-01/02, D-05..D-08, T-59.2-05..07, 2529/2529 passed, e.g. drafts").success).toBe(true);
-    expect(ValidationTextSchema(120).safeParse("Check 59-32-01/02 logs").success).toBe(false);
+    expect(ValidationTextSchema(120).safeParse("Check 59-32-01/02 logs").success).toBe(true);
     expect(ValidationTextSchema(120).safeParse("Coverage 59.1-01/D1 and 17-01/D2").success).toBe(true);
     expect(ValidationTextSchema(120).safeParse("Check db.corp first").success).toBe(false);
-    expect(ValidationTextSchema(120).safeParse("Open src/app first").success).toBe(false);
+    expect(ValidationTextSchema(120).safeParse("Open src/app and shared/safe-text.ts:42 first").success).toBe(true);
+    for (const value of ["Open /home/ana/app first", "Open /Users/ana/app first", "Open ~/app first", "Open ../app first", "Open /workspaces/app first", "Open github.com/org/app first"])
+      expect(ValidationTextSchema(120).safeParse(value).success).toBe(false);
   });
 
   it("fails closed on ambiguous, malformed or unreadable validation documents", () => {
@@ -242,7 +245,7 @@ describe("validation projection hardening", () => {
     expect(item.tables[0].irregularRows).toBe(2);
   });
 
-  it("withholds hosts, addresses, credentials, commands and directory paths that look like identifiers or prose", () => {
+  it("withholds hosts, addresses, credentials and commands but keeps project paths that look like identifiers or prose", () => {
     const cells = [
       "Reaches T-192.168.10.4/24 via DB-10.0.0.12",
       "PostgreSQL with POSTGRES_PASSWORD=hunter2 in CI",
@@ -257,8 +260,10 @@ describe("validation projection hardening", () => {
     const item = phase(table(cells.map((cell, index) => `| 59.3-01-0${index} | ${cell} | ⬜ pending |`)));
     const json = JSON.stringify(item);
     expect(BoardValidationSchema.shape.phases.element.safeParse(item).success).toBe(true);
-    expect(json).not.toMatch(/192\.168|10\.0\.0|hunter2|abc123|s3cr3t|localhost|5432|db_primary|test_auth|ops@|pytest|mix test|turbo run|rspec|web\/src|Billing\/Tests/);
+    expect(json).not.toMatch(/192\.168|10\.0\.0|hunter2|abc123|s3cr3t|localhost|5432|db_primary|ops@|pytest|mix test|turbo run|rspec/);
+    expect(item.tables[0].rows[4].cells[0]).toBe("Fixture [omitted] and test_auth.py");
     expect(item.tables[0].rows[6].cells[0]).toBe("Uses [omitted] and [omitted]");
+    expect(item.tables[0].rows[8].cells[0]).toBe("Uses web/src/lib and Billing/Tests/Lifecycle");
     for (const value of ["Contact ops@localhost", "At localhost:5432", "Uses db_primary.internal", "Set KEY=value"]) expect(ValidationTextSchema(120).safeParse(value).success).toBe(false);
   });
 

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ContextTextSchema } from "./context.js";
+import { maskPaths } from "./locations.js";
 import { memoizeByLength } from "./safe-text.js";
 
 // Numeric segments allow at most two dots ("59.2", "16.1.1") so an IPv4 address never reads as an identifier.
@@ -13,16 +14,13 @@ export const isReferenceList = (token: string) => {
   return !/(?:\d{1,3}\.){3}\d{1,3}/.test(core) && (reference.test(core) || ratio.test(core) || planReference.test(core));
 };
 export const maskReferenceLists = (value: string, replacement = "REF") => value.replace(/\S+/g, (token) => isReferenceList(token) ? replacement : token);
-const masked = (value: string) => maskReferenceLists(value).replace(/\b(?:e\.g|i\.e)\./gi, "eg");
+const masked = (value: string) => maskReferenceLists(maskPaths(value)).replace(/\b(?:e\.g|i\.e)\./gi, "eg");
 // IPv6 forms: any "::" compression, or four or more colon-separated hex groups.
 export const ipv6 = /[0-9a-f]{0,4}::[0-9a-f]{0,4}|(?:[0-9a-f]{1,4}:){3,7}[0-9a-f]{1,4}/i;
-/** Context prose rules plus host-like forms common in test documents: "@", localhost, ports, IPv6, underscore names and dotted file names. */
+/** Context prose rules plus host-like forms common in test documents: "@", localhost, ports, IPv6 and dotted names other than file names. */
 export const ValidationTextSchema = memoizeByLength((max: number) => z.string().max(max)
   .refine((value) => ContextTextSchema(max).safeParse(masked(value)).success)
   .refine((value) => !/@|\blocalhost\b|[\w-]\.[a-z_]|[a-z]:\d{2,5}\b|\S=\S/i.test(masked(value)) && !ipv6.test(masked(value))));
-/** Validation prose with no slash token other than a reference list, so not even a partial path survives. */
-export const PathFreeTextSchema = memoizeByLength((max: number) => ValidationTextSchema(max).refine((value) =>
-  !value.split(/\s+/).some((token) => token.includes("/") && !isReferenceList(token))));
 const ProseSchema = ValidationTextSchema;
 const CellSchema = z.union([z.literal(""), ProseSchema(640)]).nullable();
 const CountSchema = z.number().int().nonnegative();

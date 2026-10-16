@@ -140,11 +140,11 @@ describe("current-milestone UAT projection", () => {
     expect(item.tests[5]).toMatchObject({ reason: "no tablet available" });
   });
 
-  it("keeps issue history and withholds locations, hosts and commits' file paths from reported text", () => {
+  it("keeps issue history and project paths but withholds links and hosts from reported text", () => {
     const test = phase(document).tests[1];
     expect(test).toMatchObject({ previousResult: "issue", severity: { level: "blocker", label: "blocker" }, resolvedBy: "Plano 59.1-09 (1111aaaa RED / 2222bbbb GREEN)" });
-    expect(test.reported).toBe("Could not read it; the help was behind the form at [omitted] and in [omitted].");
-    expect(JSON.stringify(phase(document))).not.toMatch(/localhost|5043|src\/|\.razor|dark\.css|artifacts\/verification|report\.html/);
+    expect(test.reported).toBe("Could not read it; the help was behind the form at [omitted] and in src/Help/Panel.razor.");
+    expect(JSON.stringify(phase(document))).not.toMatch(/localhost|5043/);
   });
 
   it("compares Summary counts with the per-test results and never interprets narrative notes", () => {
@@ -160,9 +160,9 @@ describe("current-milestone UAT projection", () => {
   it("reads gaps and observations as records, recognizing gap entries wherever they are written", () => {
     const [gapSection, observations] = phase(document).records;
     expect(gapSection).toMatchObject({ title: "Gaps", role: "gaps", itemCount: 1, items: [{ gap: true, status: "failed", statusKind: "open", severity: { level: "major" }, test: 7, references: 2,
-      reason: "User reported: Badge is unreadable in dark mode", rootCause: "Token [omitted] resolves from [omitted]" }] });
+      reason: "User reported: Badge is unreadable in dark mode", rootCause: "Token [omitted] resolves from tests/theme/dark.css" }] });
     expect(observations.items.map((item) => [item.gap, item.id, item.statusKind, item.date])).toEqual([[false, null, "open", null], [false, null, "deferred", null], [true, "G-59.1-2", "resolved", "2026-09-19"]]);
-    expect(phase(document).otherSections).toEqual([{ title: "Objective Evidence Already Closed", lines: ["28/28 must-haves verified.", "Final dossier: [omitted]."] }]);
+    expect(phase(document).otherSections).toEqual([{ title: "Objective Evidence Already Closed", lines: ["28/28 must-haves verified.", "Final dossier: artifacts/verification/phase-59.1/report.html."] }]);
   });
 
   it("never counts a negated or contradicted pass as a pass", () => {

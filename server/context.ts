@@ -1,7 +1,7 @@
-import { ContextTextSchema, isWordAlternative, maskWordAlternatives, type BoardContext, type BoardContextPhase } from "../shared/context.js";
+import { ContextTextSchema, type BoardContext, type BoardContextPhase } from "../shared/context.js";
 import type { BoardOverview } from "../shared/overview.js";
 import { LIMITS, type AllowedArtifact, type AllowedInventory } from "./allowed-reader.js";
-import { safeText } from "./safe-prose.js";
+import { redactedText } from "./safe-prose.js";
 
 type Section = BoardContextPhase["sourceSections"][number];
 type DecisionGroup = BoardContextPhase["decisionGroups"][number];
@@ -9,10 +9,9 @@ const tags = new Set(["domain", "decisions", "specifics", "canonical_refs", "cod
 const maxContexts = 32;
 const maxExcerptCharacters = 8_000;
 const safeExcerpt = (value: string | null | undefined, max: number) => {
-  // Validate word alternatives as ordinary prose; restore them before redacting any remaining location-like token.
-  const text = safeText(value && maskWordAlternatives(value.replace(/⁄/g, "[omitted]"), "⁄"), max)?.replace(/⁄/g, "/").replace(/\S*\/\S*/g, (token) =>
-    token === "/" || isWordAlternative(token) ? token : "[omitted]");
-  return text && text.length <= max && ContextTextSchema(max).safeParse(text).success ? text : null;
+  // A fraction slash only imitates a path separator, so it never passes for a displayable path.
+  const text = redactedText(value?.replace(/⁄/g, "[omitted]"), max);
+  return text && ContextTextSchema(max).safeParse(text).success ? text : null;
 };
 
 function emptyPhase(phase: BoardOverview["roadmap"]["phases"][number], observation: BoardContextPhase["observation"]): BoardContextPhase {

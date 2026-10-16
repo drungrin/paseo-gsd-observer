@@ -256,7 +256,9 @@ next_action: "Compare apps/web/src/app/page.tsx with the fixture."
     ]));
     expect(BoardDebugSchema.safeParse(board).success).toBe(true);
     const json = JSON.stringify(board);
-    for (const hidden of ["example.com", "/home/jordan", "abc123secretvalue", "1b4e28ba", "npm run", "5432", "admin@", "abcdefghijklmnopqrstu", "8961c667", "apps/web", "page.tsx", "192.168", "10.0.0"]) expect(json).not.toContain(hidden);
+    for (const hidden of ["example.com", "/home/jordan", "abc123secretvalue", "1b4e28ba", "npm run", "5432", "admin@", "abcdefghijklmnopqrstu", "8961c667", "192.168", "10.0.0"]) expect(json).not.toContain(hidden);
+    // A project path is evidence, not a machine location.
+    expect(json).toContain("Compare apps/web/src/app/page.tsx with the fixture.");
     expect(board.sessions.find((item) => item.slug === "leaky")?.excerptsLimited).toBe(true);
     expect(board.sessions.map((item) => item.slug).sort()).toEqual([null, null, null, null, "leaky", "nova-rotina-desktop-credencial-12.4"].sort());
     expect(BoardDebugSchema.safeParse({ ...board, sessions: [{ ...board.sessions[0], slug: "db-10.0.0.12" }] }).success).toBe(false);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PathFreeTextSchema } from "./validation.js";
+import { ValidationTextSchema } from "./validation.js";
 
 export const DEBUG_STATUS_KINDS = ["open", "diagnosed", "awaiting-verification", "blocked", "resolved", "other", "unrecorded"] as const;
 export const DEBUG_LOCATIONS = ["active", "archived"] as const;
@@ -9,7 +9,7 @@ export const DEBUG_BUG_CLASSES = ["bohrbug", "heisenbug-mandelbug", "concurrency
 
 const CountSchema = z.number().int().nonnegative().max(100_000);
 const DateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
-const ProseSchema = PathFreeTextSchema;
+const ProseSchema = ValidationTextSchema;
 
 export const DebugSessionSchema = z.object({
   /** Opaque, stable within a workspace; never displayed. */

@@ -1,4 +1,4 @@
-import { isWordAlternative } from "../shared/context.js";
+import { isDisplayablePath, isFileName, redactPaths } from "../shared/locations.js";
 import { ipv6, isReferenceList, ValidationTextSchema } from "../shared/validation.js";
 import { safeText } from "./safe-prose.js";
 
@@ -25,32 +25,32 @@ const tools = "npm|pnpm|npx|yarn|bun|dotnet|cargo|docker|kubectl|helm|psql|pytes
 const subcommands = "run|test|exec|install|add|build|compose|up|apply|get|init|plan|push|pull|commit|checkout|status|diff|log|clone|fetch|merge|rebase|reset|start|serve|dev|lint|format|migrate|restore|publish|watch|vet|mod|cp|ps|logs|stop|rm|vitest|jest|playwright|tsc|eslint|prettier|vite|prisma|drizzle-kit";
 // Script runners and cloud CLIs take any lowercase subcommand ("npx playwright", "az aks").
 const runners = "npx|pnpx|bunx|uvx|pipx|az|aws|gcloud|oci";
-// A lowercase tool name followed by a flag or a subcommand starts a command written as prose; its next few arguments go with it.
-const toolCommand = new RegExp(`(?<![\\w-])(?:(?:${tools})\\s+(?:--?[a-z][\\w-]*|(?:${subcommands})\\b)|(?:${runners})\\s+[a-z][\\w-]*)(?:\\s+(?:--?[\\w-]+(?:=\\S*)?|[a-z][\\w:.@-]*|\\[omitted\\])){0,4}`, "g");
+// A lowercase tool name followed by a flag or a subcommand starts a command written as prose; its next few arguments, paths
+// included, go with it.
+const toolCommand = new RegExp(`(?<![\\w-])(?:(?:${tools})\\s+(?:--?[a-z][\\w-]*|(?:${subcommands})\\b)|(?:${runners})\\s+[a-z][\\w-]*)(?:\\s+(?:--?[\\w-]+(?:=\\S*)?|[a-z.@][\\w:.@/-]*|\\[omitted\\])){0,4}`, "g");
 
-/** Inline code is shown only as a plain identifier, reference or "key: value" pair; anything else may be a command or location. */
+/** Inline code is shown only as a plain identifier, reference, displayable path or "key: value" pair; anything else may be a command or location. */
 function codeSpan(content: string): string {
   const trimmed = content.trim();
   const tag = /^<\/?([a-z][\w-]*)>$/i.exec(trimmed);
   if (tag) return tag[1];
-  return /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(trimmed) || isReferenceList(trimmed) || /^[a-z][\w-]*:\s?[\w-]+$/i.test(trimmed) ? trimmed : "[omitted]";
+  return /^[\p{L}\p{N}][\p{L}\p{N}_-]*$/u.test(trimmed) || isReferenceList(trimmed) || isDisplayablePath(trimmed) || isFileName(trimmed) || /^[a-z][\w-]*:\s?[\w-]+$/i.test(trimmed) ? trimmed : "[omitted]";
 }
 
 function redactToken(token: string): string {
-  if (token === "/" || isReferenceList(token) || isWordAlternative(token)) return token;
+  if (isDisplayablePath(token) || isFileName(token) || isReferenceList(token)) return token;
   const [, lead, core, trail] = /^([("“'‘*_]*)(.*?)([)"”'’,.;:!?*_]*)$/.exec(token) ?? ["", "", token, ""];
   if (abbreviation.test(core)) return token;
   return /[\\/=]/.test(core) || flagToken.test(core) || hostLike.test(core) || ipv4.test(core) || ipv6.test(core) ? `${lead}[omitted]${trail}` : token;
 }
 
-/** Display prose after removing location-like, host-like and command-like tokens; reject what is still unsafe. */
+/** Display prose after removing non-displayable locations and host-like and command-like tokens; reject what is still unsafe. */
 export function excerpt(value: string | null | undefined, max: number): string | null {
   // Oversized input cannot become a valid excerpt; reject it before any token scan.
   if (!value || value.length > max * 4 + 256) return null;
   const redacted = value.replace(/⁄/g, "[omitted]").replace(/`([^`\n]*)`/g, (_, content: string) => codeSpan(content))
     .replace(toolCommand, "[omitted]").replace(/\S+/g, redactToken).replace(/\[omitted\](?:[\s,;]+\[omitted\])+/g, "[omitted]");
-  // Surviving slashes belong to identifiers or word alternatives; mask them so the prose checks do not read them as locations.
-  const text = safeText(redacted.replace(/\//g, "⁄"), max)?.replace(/⁄/g, "/");
+  const text = safeText(redacted, max);
   return text && text.length <= max && ValidationTextSchema(max).safeParse(text).success ? text : null;
 }
 
@@ -65,11 +65,10 @@ export function leadExcerpt(value: string, max: number): { text: string | null; 
 const hexDigest = /(?<![0-9a-f])[0-9a-f]{32,128}(?![0-9a-f])/gi;
 const uuid = /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi;
 
-/** Excerpts, never raw Markdown: hash-like values, UUIDs and slash tokens are masked even when embedded in otherwise safe prose. */
+/** Excerpts, never raw Markdown: hash-like values, UUIDs and non-displayable locations are masked even when embedded in otherwise safe prose. */
 export function maskedExcerpt(value: string | null | undefined, max: number): { text: string | null; limited: boolean } {
   if (value === null || value === undefined || !value.trim()) return { text: null, limited: false };
-  const safe = value.replace(hexDigest, "[omitted]").replace(uuid, "[omitted]")
-    .replace(/\S+/g, (token) => token.includes("/") && !isReferenceList(token) ? "[omitted]" : token);
+  const safe = redactPaths(value.replace(hexDigest, "[omitted]").replace(uuid, "[omitted]"));
   const result = leadExcerpt(safe, max);
   return { text: result.text, limited: result.shortened || safe !== value };
 }

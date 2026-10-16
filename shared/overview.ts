@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { BoardContextSchema } from "./context.js";
 import { BoardUatSchema } from "./uat.js";
-import { BoardValidationSchema, PathFreeTextSchema } from "./validation.js";
+import { BoardValidationSchema, ValidationTextSchema } from "./validation.js";
 import { BoardVerificationSchema } from "./verification.js";
 import { BoardTodosSchema } from "./todos.js";
 import { BoardParkingLotSchema } from "./parking-lot.js";
@@ -72,7 +72,7 @@ export const BoardOverviewPlanEntrySchema = z.object({
   roadmapConflict: z.boolean(),
   planObserved: z.boolean(),
   summaryObserved: z.boolean(),
-  summaryExcerpt: PathFreeTextSchema(640).nullable(),
+  summaryExcerpt: ValidationTextSchema(640).nullable(),
   summaryExcerptLimited: z.boolean(),
 }).strict().superRefine((value, context) => {
   if (value.roadmapConflict && value.roadmapChecked !== null) context.addIssue({ code: "custom", message: "conflicting roadmap status must be unknown" });

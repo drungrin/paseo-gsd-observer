@@ -36,7 +36,7 @@ function PlanRow({ plan, phaseId, expanded, onToggle, theme, compact }: { plan: 
     {expanded && <View accessibilityLabel={`Plan ${phaseId}-${plan.number} details`} style={{ gap: 8, marginHorizontal: compact ? 14 : 18, marginBottom: 12, padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface2 ?? theme.colors.surface0 }}>
       <Text style={{ ...textStyle(theme), fontWeight: "600" }}>Plan evidence</Text>
       <Text style={textStyle(theme, true)}>{plan.objective ?? "Objective not observed in the plan file."}</Text>
-      {plan.objective?.includes("[omitted]") && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Location-like text omitted from this excerpt.</Text>}
+      {(plan.title?.includes("[omitted]") || plan.objective?.includes("[omitted]")) && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Absolute paths and links are shown as [omitted].</Text>}
       {plan.summaryObserved && <View style={{ gap: 4 }}>
         <Text style={{ ...textStyle(theme), fontWeight: "600" }}>Summary, as recorded</Text>
         <Text style={textStyle(theme, true)}>{plan.summaryExcerpt ?? (plan.summaryExcerptLimited ? "No safe summary introduction available." : "No introductory prose recorded before the next heading.")}</Text>

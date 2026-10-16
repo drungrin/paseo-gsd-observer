@@ -1,20 +1,11 @@
 import { z } from "zod";
+import { maskPaths } from "./locations.js";
 import { memoizeByLength, PlanTextSchema } from "./safe-text.js";
 
-const alternative = /^[\p{L}][\p{L}\p{M}\p{N}-]*(?:\/[\p{L}][\p{L}\p{M}\p{N}-]*){1,3}$/u;
-const locationRoot = /^(?:src|lib|app|apps|packages|node_modules|server|client|home|users|tmp|var|etc|planning|tests|scripts|docs|config|bin|opt|usr|private)$/i;
-const directory = /^(?:src|lib|node_modules|tests?|e2e|specs?|bin|dist|components|pages|scripts|docs|fixtures|features|services|layout|public|assets|internal)$/i;
-/** Plain word alternatives such as "read/write" are prose, not locations; a segment named like a source directory makes it a location. */
-export const isWordAlternative = (token: string) => {
-  const word = token.replace(/^[("“'‘*_`]+|[)"”'’,.;:!?*_`]+$/g, "");
-  const segments = word.split("/");
-  return alternative.test(word) && !locationRoot.test(segments[0]) && !segments.some((segment) => directory.test(segment));
-};
-export const maskWordAlternatives = (value: string, replacement: string) => value.replace(/\S*\/\S*/g, (token) => isWordAlternative(token) ? token.replace(/\//g, replacement) : token);
-const maskAlternatives = (value: string) => maskWordAlternatives(value.replace(/(?<=\S) \/ (?=\S)/g, "   "), " ");
+/** Plan prose rules plus no e-mail address, IPv4 address or dotted host name; displayable paths and file names are not hosts. */
 export const ContextTextSchema = memoizeByLength((max: number) => z.string().max(max)
-  .refine((value) => PlanTextSchema(max).safeParse(maskAlternatives(value)).success)
-  .refine((value) => !/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[a-z0-9](?:[a-z0-9-]*\.)+[a-z][a-z0-9-]*\b/i.test(value)));
+  .refine((value) => PlanTextSchema(max).safeParse(value).success)
+  .refine((value) => !/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[a-z0-9](?:[a-z0-9-]*\.)+[a-z][a-z0-9-]*\b/i.test(maskPaths(value))));
 const ProseSchema = ContextTextSchema;
 
 const SectionSchema = z.object({ title: ProseSchema(120), lines: z.array(ProseSchema(640)).max(12) }).strict();

@@ -30,7 +30,7 @@ function PhaseBriefing({ phase, theme, compact, sourceOpen, onToggleSource }: { 
       <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Context observed{phase.gatheredAt ? ` · Gathered ${phase.gatheredAt}` : ""}{phase.decisionCount ? ` · ${phase.decisionCount} numbered decisions recorded` : ""}</Text>
       {phase.recordedStatus && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Document status: {phase.recordedStatus} (recorded when gathered; not live phase progress).</Text>}
       {phase.amendmentsObserved && <Text role="alert" style={{ ...textStyle(theme, true), fontSize: 12 }}>Later amendments are recorded; earlier decision excerpts may have been superseded. Review the source before relying on them.</Text>}
-      {JSON.stringify(phase).includes("[omitted]") && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Location-like text is shown as [omitted].</Text>}
+      {JSON.stringify(phase).includes("[omitted]") && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Absolute paths and links are shown as [omitted].</Text>}
       {phase.excerptsLimited && <Text role="alert" style={{ ...textStyle(theme, true), fontSize: 12 }}>Some context sections could not be safely extracted or were shortened.</Text>}
     </View>
     <ContextCard title="Phase boundary" theme={theme}>{phase.boundary.length ? phase.boundary.map((line, index) => <Text key={index} style={textStyle(theme)}>{line}</Text>) : <Text style={textStyle(theme, true)}>No safe boundary excerpt available.</Text>}</ContextCard>

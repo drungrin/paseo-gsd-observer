@@ -1,5 +1,5 @@
 import type { BoardOverview } from "../shared/overview.js";
-import { safePlanText, safeText } from "./safe-prose.js";
+import { redactedText, safeText } from "./safe-prose.js";
 import { atxHeading } from "./document-text.js";
 import { buildContext } from "./context.js";
 import { buildUat } from "./uat.js";
@@ -463,7 +463,7 @@ function planObjective(artifact: AllowedArtifact): string | null {
   const matches = [...text.matchAll(/^ {0,3}<objective>\s*([^\n<]{1,640})(?=<|\n|$)/gim)];
   if (matches.length !== 1) return null;
   const statement = matches[0][1].split(/\s+(?:Purpose|Output):/i)[0];
-  return safePlanText(statement, 640);
+  return redactedText(statement, 640);
 }
 
 function projectPlans(inventory: AllowedInventory, roadmap: BoardOverview["roadmap"], details: Map<string, Detail>, warnings: Set<Warning>): BoardOverview["plans"] {
@@ -511,8 +511,8 @@ function projectPlans(inventory: AllowedInventory, roadmap: BoardOverview["roadm
       if ((pair?.plan.length ?? 0) > 1 || (pair?.summary.length ?? 0) > 1) limited = true;
       const plan = pair?.plan.length === 1 ? pair.plan[0] : undefined;
       const summary = pair?.summary.length === 1 ? pair.summary[0] : undefined;
-      const title = safePlanText(declared.get(number)?.title, 160) ?? safePlanText(plan?.decoded?.planTitle, 160);
-      const objective = safePlanText(plan?.decoded?.planGoal, 640) ?? (plan?.decoded ? planObjective(plan.artifact) : null);
+      const title = redactedText(declared.get(number)?.title, 160) ?? redactedText(plan?.decoded?.planTitle, 160);
+      const objective = redactedText(plan?.decoded?.planGoal, 640) ?? (plan?.decoded ? planObjective(plan.artifact) : null);
       const introduction = summary?.decoded ? (() => { try { return summaryIntro(summary.artifact); } catch { return { text: null, limited: true }; } })() : { text: null, limited: false };
       const declaration = declared.get(number);
       entries.push({ id: `${phase.id}-${number}`, number, title,

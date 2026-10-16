@@ -1,4 +1,4 @@
-import { PathFreeTextSchema } from "../shared/validation.js";
+import { ValidationTextSchema } from "../shared/validation.js";
 import { LIMITS, type AllowedArtifact } from "./allowed-reader.js";
 import { atxHeading, decodeDocument, frontmatter, maskedExcerpt } from "./document-text.js";
 
@@ -44,5 +44,5 @@ export function summaryIntro(artifact: AllowedArtifact): SummaryIntro {
   }
   if (!paragraph.length) return fence || comment ? unavailable() : { text: null, limited: false };
   const display = maskedExcerpt(paragraph.join(" "), displayLength);
-  return display.text && !PathFreeTextSchema(displayLength).safeParse(display.text).success ? unavailable() : display;
+  return display.text && !ValidationTextSchema(displayLength).safeParse(display.text).success ? unavailable() : display;
 }

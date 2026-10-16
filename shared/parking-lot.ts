@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { PathFreeTextSchema } from "./validation.js";
+import { ValidationTextSchema } from "./validation.js";
 
 const CountSchema = z.number().int().nonnegative().max(262_144);
-const ProseSchema = PathFreeTextSchema;
+const ProseSchema = ValidationTextSchema;
 
 export const ParkingLotItemSchema = z.object({
   id: z.string().regex(/^999\.\d+(?:\.\d+)?$/).max(64),
