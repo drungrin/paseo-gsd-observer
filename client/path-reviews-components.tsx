@@ -91,7 +91,7 @@ export function PathReviewsView({ state, onRefresh, theme, compact = false }: Th
   const warnings = path?.warnings.filter((warning) => warning.startsWith("reviews-")) ?? [];
   return <PathFrame title="Reviews" description="Wave, panel, final and gap reviews recorded for the current milestone." subject="reviews" state={state} onRefresh={onRefresh} theme={theme} compact={compact}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : reviews?.availability === "available" ? <>
-      <Text style={smallStyle(theme)}>Verdicts as the reviewers recorded them. A later cycle that recorded a pass or blocked verdict supersedes earlier cycles of its wave.</Text>
+      <Text style={smallStyle(theme)}>Verdicts as the reviewers recorded them. Among cycles of one wave and lens that recorded pass or blocked, only the latest is current.</Text>
       {reviews.limited && <Text role="alert" style={textStyle(theme, true)}>Some review files could not be fully read; the list may be partial.</Text>}
       {warnings.map((warning) => <Text key={warning} style={smallStyle(theme)}>{PATH_WARNING_COPY[warning]}</Text>)}
       {isEmpty(reviews.current) ? <Card title="No reviews yet" theme={theme}><Text style={textStyle(theme, true)}>No review files are recorded for the current milestone.</Text></Card> : <ReviewSet set={reviews.current} theme={theme} />}

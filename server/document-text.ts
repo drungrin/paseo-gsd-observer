@@ -66,6 +66,16 @@ export function leadExcerpt(value: string, max: number): { text: string | null; 
 const hexDigest = /(?<![0-9a-f])[0-9a-f]{32,128}(?![0-9a-f])/gi;
 const uuid = /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi;
 
+/**
+ * An identifier taken from a file name (a debug session `/gsd-debug` resumes by, a review file), not prose: dots only before
+ * digits ("12.4"), so it never reads as a host or file; no IPv4 address, digest, UUID or credential-shaped segment.
+ */
+export function displaySlug(slug: string): string | null {
+  if (slug.length > 96 || !/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+|\.\d+)*$/.test(slug) || /\d+(?:\.\d+){3}/.test(slug)) return null;
+  if (/[0-9a-f]{32}/i.test(slug.replace(/[-_]/g, "")) || /(?:^|[-_])(?:gh[pousr]_|github_pat_|sk-|akia[0-9a-z]{8})/i.test(slug)) return null;
+  return slug.split(/[-_.]/).every((segment) => segment.length <= 40) ? slug : null;
+}
+
 /** Hash-like values and UUIDs shown as "[omitted]". */
 export const maskDigests = (value: string) => value.replace(hexDigest, "[omitted]").replace(uuid, "[omitted]");
 

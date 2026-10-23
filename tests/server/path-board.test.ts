@@ -1,4 +1,4 @@
-import { chmod } from "node:fs/promises";
+import { chmod, utimes } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readAllowedInventory } from "../../server/allowed-reader";
@@ -75,8 +75,12 @@ describe("GSD Path detection", () => {
     const { snapshot } = await snapshotOf(replaced(forkFiles, ".project/STATE.md", hostile));
     expect(snapshot.path?.state).toMatchObject({ branch: null, defaultBranch: null });
     expect(JSON.stringify(snapshot)).not.toMatch(/corp\.example|9e8d7c6/);
-    const release = forkState().replace("branch: feature/milestone-001", "branch: release/1.2");
-    expect((await snapshotOf(replaced(forkFiles, ".project/STATE.md", release))).snapshot.path?.state.branch).toBe("release/1.2");
+    for (const branch of ["release/1.2", "release/20261022"]) {
+      const release = forkState().replace("branch: feature/milestone-001", `branch: ${branch}`);
+      expect((await snapshotOf(replaced(forkFiles, ".project/STATE.md", release))).snapshot.path?.state.branch).toBe(branch);
+    }
+    const hexMember = replaced(forkFiles, ".project/tasks/T003-register-invoices.md", "---\nid: T003\nwave: 2\nstatus: pending\nrepo: 5a5b5c5d5e5f6061626364656667686970717273\n---\n");
+    expect((await snapshotOf(hexMember)).snapshot.path?.tasks.waves[1].tasks[0]).toMatchObject({ id: "T003", repo: null });
   });
 
   it("refuses a linked .project and a linked state file without following them", async () => {
@@ -272,12 +276,74 @@ describe("GSD Path reviews", () => {
   });
 });
 
+describe("GSD Path review rules shared with the daemon", () => {
+  const review = (verdict: string) => `# Review\n\nWave verdict: ${verdict}\nCycle: 1\nDepth: full\n`;
+
+  it("reads a verdict's leading word and supersedes only settled cycles of the same wave and file-name lens", async () => {
+    const reviews = (await snapshotOf([...upstreamFiles,
+      { path: ".project/review/wave-1.cycle1.md", content: review("fail") },
+      { path: ".project/review/wave-1.cycle2.md", content: review("blocked") },
+      { path: ".project/review/wave-1.cycle3.md", content: review("pass — all findings fixed") },
+      { path: ".project/review/wave-2.cycle1.md", content: review("pass").replace("Depth: full", "Lens: contract") },
+      { path: ".project/review/wave-2.cycle2.adversarial.md", content: review("pass") },
+    ])).snapshot.path!.reviews.current.waves;
+    expect(reviews.map(({ wave, cycle, verdict, superseded }) => ({ wave, cycle, verdict, superseded }))).toEqual([
+      // "fail" is not a verdict the runtime accepts, so it is neither replaced nor counted, as in the daemon.
+      { wave: 1, cycle: 1, verdict: "fail", superseded: false },
+      { wave: 1, cycle: 2, verdict: "blocked", superseded: true },
+      { wave: 1, cycle: 3, verdict: "pass", superseded: false },
+      // A `Lens:` line labels a review; only the file-name lens groups cycles.
+      { wave: 2, cycle: 1, verdict: "pass", superseded: false },
+      { wave: 2, cycle: 2, verdict: "pass", superseded: false },
+    ]);
+    expect(reviews[3].lens).toBe("contract");
+  });
+
+  it("keeps the newest build recoveries when there are more than the cap, without calling the rest unreadable", async () => {
+    const bases = Array.from({ length: 33 }, (_, index) => `${index.toString(16).padStart(7, "0")}${"a".repeat(33)}`);
+    const workspace = await FixtureWorkspace.create([...upstreamFiles, ...bases.map((base) => ({ path: `.project/plan/build-recovery-${base}/review/wave-1.cycle1.md`, content: review("pass") }))]);
+    try {
+      // The first base is the oldest folder; names alone would read it first.
+      for (const [index, base] of bases.entries()) await utimes(join(workspace.root, ".project", "plan", `build-recovery-${base}`), 1_700_000_000 + index, 1_700_000_000 + index);
+      const path = buildPath(await readAllowedInventory(workspace.root));
+      expect(path.reviews).toMatchObject({ availability: "available", limited: true });
+      expect(path.reviews.recoveries).toHaveLength(32);
+      expect(path.reviews.recoveries.map((recovery) => recovery.base)).not.toContain(bases[0].slice(0, 7));
+      expect(path.warnings).not.toContain("reviews-unavailable");
+      expect(path.warnings).toContain("evidence-limited");
+    } finally { await workspace.cleanup(); }
+  });
+});
+
 describe("GSD Path questions", () => {
   it("lists answers still awaiting a follow-up and closes disposed or superseded ones", async () => {
     const questions = (await snapshotOf([...forkFiles, ...forkReviewFiles])).snapshot.path!.questions;
     expect(questions.counts).toEqual({ answers: 5, pending: 1, closed: 2 });
     expect(questions.pending).toEqual([{ id: "A001", date: "2026-10-05", topic: "storage account", question: expect.stringContaining("Which storage account keeps the invoice files"), status: "needs-user", owner: "user", target: ".project/intent/INTENT.md" }]);
     expect(questions.pending[0].question).not.toMatch(/account-key|\/home/);
+  });
+
+  it("keeps records after a stray comment marker and matches status and follow-up exactly", async () => {
+    const answers = `# Answers
+
+## Answer A001 — 2026-10-01 — markers
+- **Question**: Should the importer strip \`<!--\` markers?
+- **Status**: final
+- **Follow-up**: required
+
+## Answer A002 — 2026-10-02 — unclosed
+- **Question**: Is <!-- an unclosed marker harmless?
+- **Status**: NEEDS-USER
+- **Follow-up**: required
+
+## Answer A003 — 2026-10-03 — casing
+- **Question**: Does a capitalized status count?
+- **Status**: Final
+- **Follow-up**: required
+`;
+    const questions = (await snapshotOf([...upstreamFiles, { path: ".project/discuss/ANSWERS.md", content: answers }])).snapshot.path!.questions;
+    expect(questions.counts).toEqual({ answers: 3, pending: 2, closed: 0 });
+    expect(questions.pending.map((question) => question.id)).toEqual(["A001", "A002"]);
   });
 
   it("is absent until a discussion records an answer", async () => {

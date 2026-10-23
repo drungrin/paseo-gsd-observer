@@ -40,8 +40,9 @@ const isPathInstall = async (root: string) => {
 
 /**
  * The `pipeline:` value in the frontmatter of a regular `.project/STATE.md`, read from its first bytes. The file is opened
- * without following links or blocking on a FIFO, must be the file that was checked, and must still resolve inside the root
- * after the read. An unreadable file names no pipeline; the reader reports it later if GSD Path is installed.
+ * without following links or blocking on a FIFO, must be a regular file, and must still resolve inside the root after the
+ * read. GSD Path rewrites the file by rename, so a new inode is the same document, not a swap. An unreadable file names no
+ * pipeline; the reader reports it later if GSD Path is installed.
  */
 async function pipelineMarker(root: string, projectRoot: string): Promise<string | null | "refused"> {
   const file = join(projectRoot, "STATE.md");
@@ -52,7 +53,7 @@ async function pipelineMarker(root: string, projectRoot: string): Promise<string
   if (!handle) return null;
   try {
     const descriptor = await handle.stat();
-    if (!descriptor.isFile() || descriptor.dev !== before.dev || descriptor.ino !== before.ino) return "refused";
+    if (!descriptor.isFile()) return "refused";
     const buffer = Buffer.alloc(MARKER_BYTES);
     const { bytesRead } = await handle.read(buffer, 0, MARKER_BYTES, 0);
     if (!isStrictDescendant(root, await realpath(file))) return "refused";

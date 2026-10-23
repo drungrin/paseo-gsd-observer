@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { BoardDebugSchema, DebugSessionSchema, type BoardDebug, type DebugLocation, type DebugNote, type DebugSession, type DebugStatusKind } from "../shared/debug.js";
 import { LIMITS, type AllowedArtifact, type AllowedInventory } from "./allowed-reader.js";
-import { atxHeading, date, decodeDocument, frontmatter, maskedExcerpt, normalize, readSections, statusParts, withContinuation, type Section } from "./document-text.js";
+import { atxHeading, date, decodeDocument, displaySlug, frontmatter, maskedExcerpt, normalize, readSections, statusParts, withContinuation, type Section } from "./document-text.js";
 
 const maxSessions = 160;
 const maxDetailCharacters = 96_000;
@@ -204,16 +204,6 @@ function bugClass(value: string | null | undefined): DebugSession["bugClass"] {
   const words = normalize(value);
   const classes = new Set([...words.matchAll(/\b(bohrbug|heisenbug[- ]?mandelbug|concurrency)\b/g)].map((match) => match[1].startsWith("heisenbug") ? "heisenbug-mandelbug" as const : match[1] as "bohrbug" | "concurrency"));
   return classes.size === 1 && /^\W*(?:bohrbug|heisenbug|concurrency)/.test(words) ? [...classes][0] : null;
-}
-
-/**
- * The session name `/gsd-debug` resumes by. It is an identifier, not prose: dots only before digits ("12.4"), so it never reads
- * as a host or file; no IPv4 address, digest, UUID or credential-shaped segment.
- */
-function displaySlug(slug: string): string | null {
-  if (slug.length > 96 || !/^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+|\.\d+)*$/.test(slug) || /\d+(?:\.\d+){3}/.test(slug)) return null;
-  if (/[0-9a-f]{32}/i.test(slug.replace(/[-_]/g, "")) || /(?:^|[-_])(?:gh[pousr]_|github_pat_|sk-|akia[0-9a-z]{8})/i.test(slug)) return null;
-  return slug.split(/[-_.]/).every((segment) => segment.length <= 40) ? slug : null;
 }
 
 function phase(value: string | null | undefined): string | null {

@@ -304,4 +304,8 @@ Overall verdict: blocked
   { path: ".project/review/final-gap-1.md", content: "# Gap Review — 1: project Verify\n\nReviewed HEAD: c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00\nGap verdict: pass\nRisk: project Verify\n\n## Output\n\n### stdout\n" },
   { path: ".project/review/PATCH-FINDINGS.md", content: "# Patch findings\n" },
   { path: ".project/review/reviewer-notes.md", content: "# Notes\n" },
+  // Names that read as a host, an address or a credential are never shown.
+  { path: ".project/review/prod-db.corp.example.com.md", content: "# Notes\n" },
+  { path: ".project/review/deploy-10.0.3.17.md", content: "# Notes\n" },
+  { path: ".project/review/ghp_abcdefABCDEF1234567890abcdef.md", content: "# Notes\n" },
 ];

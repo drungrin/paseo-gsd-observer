@@ -12,7 +12,8 @@ const dispositionHeading = /^Disposition\s+X\d{3,6}\b/;
 const field = /^-\s+\*\*([^*]{1,64})\*\*:\s*(.*)$/;
 const answerId = /^A\d{3,6}$/;
 const maxPending = 128;
-const awaiting = new Set(["final", "needs-user"]);
+// The daemon's exact values: a differently cased status or follow-up is not the recorded state.
+const awaiting = new Set(["final", "NEEDS-USER"]);
 
 export const emptyQuestions = (availability: PathQuestions["availability"]): PathQuestions => ({ availability, pending: [], counts: { answers: 0, pending: 0, closed: 0 }, limited: false });
 
@@ -52,7 +53,7 @@ export function buildQuestions(inventory: AllowedInventory, warnings: Set<PathWa
   }
   const pending: PathQuestion[] = [];
   for (const { id, rest, values } of answers) {
-    if (closed.has(id) || values.get("follow-up")?.toLowerCase() !== "required" || !awaiting.has(token(values.get("status")) ?? "")) continue;
+    if (closed.has(id) || values.get("follow-up") !== "required" || !awaiting.has(values.get("status") ?? "")) continue;
     // "## Answer A001 — 2026-10-01 — topic"
     const [date, ...topic] = rest.replace(/^\s*[—–-]\s*/, "").split(/\s+[—–-]\s+/);
     const question: PathQuestion = {

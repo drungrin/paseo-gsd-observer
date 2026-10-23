@@ -1,3 +1,4 @@
+import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import type { AllowedArtifact, AllowedInventory, InventoryProblem, InventoryWarning, PathArtifactKind } from "./allowed-reader.js";
 import { FILE_BYTES, listDirectory, readSafeFile, SNAPSHOT_BYTES, validateSafeDirectory } from "./safe-files.js";
@@ -88,7 +89,10 @@ export async function readPathInventory(root: string, projectRoot: string): Prom
   if (watchDirectories.includes("plan")) {
     const listing = await listDirectory(join(projectRoot, "plan"));
     if (listing.warning) problem("path-recovery-review", listing.warning);
-    const recoveries = listing.entries.filter((name) => PATH_RECOVERY_DIRECTORY.test(name)).sort();
+    // Folder names are hashes, so the cap and budget keep the most recently changed recoveries and drop the oldest.
+    const named = listing.entries.filter((name) => PATH_RECOVERY_DIRECTORY.test(name));
+    const changed = new Map(await Promise.all(named.map(async (name) => [name, (await lstat(join(projectRoot, "plan", name)).catch(() => null))?.mtimeMs ?? 0] as const)));
+    const recoveries = named.sort((left, right) => (changed.get(right) ?? 0) - (changed.get(left) ?? 0) || left.localeCompare(right));
     if (recoveries.length > RECOVERIES) problem("path-recovery-review", "limit-reached");
     for (const name of recoveries.slice(0, RECOVERIES)) {
       const folder = join("plan", name);

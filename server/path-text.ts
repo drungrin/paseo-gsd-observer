@@ -13,28 +13,36 @@ export const slugPattern = /^[a-z0-9][a-z0-9-]{0,127}$/;
 // Branch names are shown as recorded ("feature/milestone-001" in a fork, "gsd-path/M001" upstream) and never parsed.
 export const branchPattern = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 // Both editions name members with the slug rule.
-export const memberPattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const memberPattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const hostSegment = /^(?:[a-z0-9-]+\.)+[a-z]{2,24}$/i;
-const hexSegment = /^[0-9a-f]{7,}$/i;
+// A commit hash has a hex letter; a date or build number ("release/20261022") does not read as one.
+const hexSegment = /^(?=[0-9]*[a-f])[0-9a-f]{7,}$/i;
 /** A recorded branch, unless a segment reads as a host name or a commit. */
 export const branchName = (value: string | null | undefined) => value && branchPattern.test(value) && !value.split("/").some((segment) => hostSegment.test(segment) || hexSegment.test(segment)) ? value : null;
+/** A recorded member name, unless it reads as a commit. */
+export const memberName = (value: string | null | undefined) => value && memberPattern.test(value) && !hexSegment.test(value) ? value : null;
 export const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Templates and the runtime write guidance as HTML comments, some spanning lines after a value ("Lane: quick   <!-- … -->"); none of it is evidence. */
+/**
+ * Templates and the runtime write guidance as HTML comments, some spanning lines after a value ("Lane: quick   <!-- … -->");
+ * none of it is evidence. A `<!--` inside inline code is text, and an unclosed comment is kept as text, so a stray marker
+ * never hides the records after it.
+ */
 export function withoutComments(text: string): string {
   let result = "";
   let index = 0;
-  while (index < text.length) {
-    const start = text.indexOf("<!--", index);
-    if (start < 0) return result + text.slice(index);
-    result += text.slice(index, start);
+  let from = 0;
+  while (from < text.length) {
+    const start = text.indexOf("<!--", from);
+    if (start < 0) break;
+    const lineStart = text.lastIndexOf("\n", start) + 1;
+    if ((text.slice(lineStart, start).match(/`/g)?.length ?? 0) % 2 === 1) { from = start + 4; continue; }
     const end = text.indexOf("-->", start + 4);
-    // An unclosed comment hides the rest of the document, as it does in rendered Markdown.
-    if (end < 0) return result;
-    result += text.slice(start, end).replace(/[^\n]/g, "");
-    index = end + 3;
+    if (end < 0) break;
+    result += text.slice(index, start) + text.slice(start, end).replace(/[^\n]/g, "");
+    index = from = end + 3;
   }
-  return result;
+  return result + text.slice(index);
 }
 
 /** Document lines outside fenced code, or null when a line is too long or a fence never closes. */
@@ -125,6 +133,9 @@ export function firstLabelled(lines: readonly string[], label: string, token = f
   }
   return null;
 }
+
+/** The leading word of a verdict line ("pass — all fixed" reads "pass"), as the GSD Path daemon reads verdicts. */
+export const leadToken = (value: string | null | undefined) => token(/^([A-Za-z][A-Za-z0-9-]*)/.exec(value?.trim() ?? "")?.[1]);
 
 /** A recorded lowercase token (phase, status, verdict); anything else is not a token and is not shown. */
 export const token = (value: string | null | undefined) => {

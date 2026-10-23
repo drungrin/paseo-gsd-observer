@@ -1,7 +1,7 @@
 import { PathTaskSchema, PathTasksSchema, PathWaveSchema, type PathTask, type PathTasks, type PathWarning, type PathWave } from "../shared/path.js";
 import type { AllowedInventory } from "./allowed-reader.js";
 import { atxHeading } from "./document-text.js";
-import { dashed, headings, labelledParagraph, memberPattern, pathDocument, pathFrontmatter, proseLines, shortExcerpt, taskIdPattern, token, withoutComments } from "./path-text.js";
+import { dashed, headings, labelledParagraph, memberName, pathDocument, pathFrontmatter, proseLines, shortExcerpt, taskIdPattern, token, withoutComments } from "./path-text.js";
 
 const maxTasks = 512;
 const maxWaves = 64;
@@ -46,11 +46,10 @@ function readTask(key: string, bytes: Uint8Array, warnings: Set<PathWarning>): P
   const heading = proseLines(withoutComments(fields.body))?.map((line) => atxHeading(line, 0)).find((entry) => entry?.level === 1);
   const headingTitle = heading ? dashed(heading.text) : null;
   const ids = (key: string) => [...new Set((lists.get(key) ?? []).filter((item) => taskIdPattern.test(item)))].slice(0, 64);
-  const repo = values.get("repo");
   const task: PathTask = {
     id, title: shortExcerpt(values.get("title") ?? (headingTitle?.lead === id ? headingTitle.rest : null), 240).text,
     status: token(values.get("status")), wave, deps: ids("deps"), supersedes: ids("supersedes"),
-    repo: repo && memberPattern.test(repo) ? repo : null,
+    repo: memberName(values.get("repo")),
     files: Math.min(lists.get("files")?.length ?? 0, 100_000), idConflict,
   };
   if (PathTaskSchema.safeParse(task).success) return task;
