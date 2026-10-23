@@ -1,11 +1,10 @@
 import { PathTaskSchema, PathTasksSchema, PathWaveSchema, type PathTask, type PathTasks, type PathWarning, type PathWave } from "../shared/path.js";
 import type { AllowedInventory } from "./allowed-reader.js";
 import { atxHeading } from "./document-text.js";
-import { dashed, firstLabelled, headings, pathDocument, pathFrontmatter, proseLines, shortExcerpt, taskIdPattern, token, withoutComments } from "./path-text.js";
+import { dashed, headings, labelledParagraph, memberPattern, pathDocument, pathFrontmatter, proseLines, shortExcerpt, taskIdPattern, token, withoutComments } from "./path-text.js";
 
 const maxTasks = 512;
 const maxWaves = 64;
-const memberPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const taskKey = /^tasks\/(T\d{3,6})-[^/]+\.md$/;
 const emptyCounts = (): PathTasks["counts"] => ({ total: 0, done: 0, inProgress: 0, pending: 0, failed: 0, blocked: 0, other: 0 });
 export const emptyTasks = (availability: PathTasks["availability"]): PathTasks => ({ availability, planObserved: false, waves: [], unassigned: [], counts: emptyCounts(), currentWave: null, limited: false });
@@ -28,7 +27,7 @@ function planWaves(inventory: AllowedInventory, warnings: Set<PathWarning>): { o
     const number = /^Wave\s+(\d{1,4})$/i.exec(lead)?.[1];
     if (!number) continue;
     if (waves.has(Number(number))) { warnings.add("plan-malformed"); continue; }
-    const goal = shortExcerpt(firstLabelled(section.lines, "Goal"), 640);
+    const goal = shortExcerpt(labelledParagraph(section.lines, "Goal"), 640);
     waves.set(Number(number), { number: Number(number), name: shortExcerpt(rest, 200).text, goal: goal.text, goalShortened: goal.shortened });
   }
   return { observed: true, waves };

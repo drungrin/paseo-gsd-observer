@@ -19,11 +19,13 @@ import { createBoardController } from "../../index.client";
 import { OverviewView } from "../../client/overview-components";
 import { PlansView } from "../../client/plans-components";
 import { PathOverviewView } from "../../client/path-overview-components";
+import { PathQuestionsView } from "../../client/path-questions-components";
+import { PathReviewsView } from "../../client/path-reviews-components";
 import { PathTasksView } from "../../client/path-tasks-components";
 import { createBoardService } from "../../index.server";
 import { boardRpc } from "../../shared/board-rpc";
 import { fixtureFiles } from "../fixtures/gsd-fixtures";
-import { forkFiles, upstreamFiles } from "../fixtures/path-fixtures";
+import { forkFiles, forkReviewFiles, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
 import { FakeHost } from "../helpers/fake-host";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 import { FakeWatcher } from "../helpers/fake-watcher";
@@ -69,7 +71,7 @@ describe("board tracer", () => {
   });
 
   it("serves a GSD Path workspace, fork or upstream, through the same refresh-to-tasks path", async () => {
-    for (const [files, branch] of [[forkFiles, "feature/milestone-001"], [upstreamFiles, "gsd-path/M001"]] as const) {
+    for (const [files, branch, review, question] of [[[...forkFiles, ...forkReviewFiles], "feature/milestone-001", "Panel: gpt, muse", "A001 · storage account"], [[...upstreamFiles, ...upstreamReviewFiles], "gsd-path/M001", "Overall verdict: Blocked", "No discussion recorded"]] as const) {
       const workspace = await FixtureWorkspace.create(files);
       const host = new FakeHost();
       host.registerWorkspace("selected", workspace.root);
@@ -82,6 +84,8 @@ describe("board tracer", () => {
       for (const compact of [false, true]) {
         expect(text(expand(PathOverviewView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(branch);
         expect(text(expand(PathTasksView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain("Wave 1");
+        expect(text(expand(PathReviewsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(review);
+        expect(text(expand(PathQuestionsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(question);
       }
       controller.dispose();
       await service.close();
@@ -143,7 +147,7 @@ describe("board tracer", () => {
   });
 
   it("keeps client and shared imports inside the read-only plugin boundary", async () => {
-    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "shared/board-rpc.ts", "shared/path.ts"];
+    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "client/path-reviews-components.tsx", "client/path-questions-components.tsx", "shared/board-rpc.ts", "shared/path.ts"];
     const sources = await Promise.all(files.map(async (file) => ({ file, source: await readFile(file, "utf8") })));
     for (const { file, source } of sources) {
       const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

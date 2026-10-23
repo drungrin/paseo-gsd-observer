@@ -50,6 +50,10 @@ export const PATH_WARNING_COPY: Record<PathWarning, string> = {
   "task-id-conflict": "Some task files record an id that differs from their file name; the file name is shown.",
   "task-duplicate": "More than one task file uses the same task id.",
   "next-unavailable": "The next milestone's state file could not be read.",
+  "reviews-unavailable": "Some review files could not be read safely.",
+  "reviews-malformed": "Some review files could not be parsed and are not shown.",
+  "questions-unavailable": "The discussion answers file could not be read.",
+  "questions-malformed": "Some discussion answers could not be shown safely.",
   "evidence-limited": "Only part of the project evidence could be read within the safe limits.",
 };
 

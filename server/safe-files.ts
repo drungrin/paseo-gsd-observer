@@ -39,7 +39,8 @@ export async function readSafeFile(evidenceRoot: string, file: string, maxBytes:
   if (!isStrictDescendant(evidenceRoot, canonical)) return { warning: "containment-refused" };
   let handle;
   try {
-    handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // A FIFO swapped in after the check must not block the read.
+    handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const descriptor = await handle.stat();
     if (!descriptor.isFile() || descriptor.dev !== before.dev || descriptor.ino !== before.ino || descriptor.size !== before.size) return { warning: "inconsistent" };
     const buffer = Buffer.alloc(Math.min(descriptor.size, maxBytes) + 1);

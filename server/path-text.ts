@@ -1,4 +1,4 @@
-import { atxHeading, decodeDocument, excerpt, leadExcerpt } from "./document-text.js";
+import { atxHeading, decodeDocument, excerpt, leadExcerpt, maskDigests } from "./document-text.js";
 
 /** Shared reading of GSD Path documents. Both the upstream package and forks write the same line formats, so nothing here depends on a version. */
 
@@ -12,6 +12,12 @@ export const tokenPattern = /^[a-z][a-z0-9-]{0,31}$/;
 export const slugPattern = /^[a-z0-9][a-z0-9-]{0,127}$/;
 // Branch names are shown as recorded ("feature/milestone-001" in a fork, "gsd-path/M001" upstream) and never parsed.
 export const branchPattern = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+// Both editions name members with the slug rule.
+export const memberPattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const hostSegment = /^(?:[a-z0-9-]+\.)+[a-z]{2,24}$/i;
+const hexSegment = /^[0-9a-f]{7,}$/i;
+/** A recorded branch, unless a segment reads as a host name or a commit. */
+export const branchName = (value: string | null | undefined) => value && branchPattern.test(value) && !value.split("/").some((segment) => hostSegment.test(segment) || hexSegment.test(segment)) ? value : null;
 export const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Templates and the runtime write guidance as HTML comments, some spanning lines after a value ("Lane: quick   <!-- … -->"); none of it is evidence. */
@@ -64,9 +70,10 @@ export function pathFrontmatter(text: string): PathFields | null {
     const entry = /^([a-z][a-z0-9_]*):(.*)$/.exec(lines[index]);
     if (!entry) continue;
     const key = entry[1];
-    const raw = entry[2].replace(/(?:^|\s+)#.*$/, "").trim();
-    const quoted = /^(["'])(.*)\1$/.exec(raw);
-    let value: string | null = quoted ? quoted[2] : raw === "null" || raw === "~" ? null : raw;
+    // A quoted value keeps a " #" inside its quotes; only what follows the closing quote can be a comment.
+    const quoted = /^\s*(["'])(.*?)\1(?:\s+#.*)?\s*$/.exec(entry[2]);
+    const raw = quoted ? quoted[2] : entry[2].replace(/(?:^|\s+)#.*$/, "").trim();
+    let value: string | null = quoted ? raw : raw === "null" || raw === "~" ? null : raw;
     if (value !== null && /^\[.*\]$/.test(value)) { lists.set(key, listValue(value)); value = null; }
     else if (value === "") {
       const items: string[] = [];
@@ -93,6 +100,21 @@ export function labelled(line: string, label: string, token = false): string | n
   if (!line.startsWith(`${label}:`)) return null;
   const value = line.slice(label.length + 1).trim();
   return (token ? value.replace(/\s+#.*$/, "").trim() : value) || null;
+}
+
+const fieldLine = /^[A-Z][A-Za-z ()/-]{0,40}:(?:\s|$)/;
+
+/** A labelled value with the lines that wrap it, up to a blank line, a heading, a list item or the next labelled field. */
+export function labelledParagraph(lines: readonly string[], label: string): string | null {
+  const index = lines.findIndex((line) => labelled(line, label) !== null);
+  if (index < 0) return null;
+  const parts = [labelled(lines[index], label) as string];
+  for (const line of lines.slice(index + 1)) {
+    const trimmed = line.trim();
+    if (!trimmed || /^(?:#|[-*+]\s|\d+\.\s|\||>)/.test(trimmed) || fieldLine.test(trimmed)) break;
+    parts.push(trimmed);
+  }
+  return parts.join(" ");
 }
 
 /** The first labelled value among the lines, ignoring repeats. */
@@ -136,10 +158,12 @@ export function dashed(heading: string): { lead: string; rest: string | null } {
  * goals and titles are shortened rather than withheld; wording that is unsafe at any length still is.
  */
 export function shortExcerpt(value: string | null | undefined, max: number): { text: string | null; shortened: boolean } {
-  const text = value?.replace(/\s+/g, " ").trim();
-  if (!text) return { text: null, shortened: false };
+  if (!value?.trim()) return { text: null, shortened: false };
+  // Commit hashes and UUIDs are machine identifiers, not prose, wherever they appear; masking one counts as withholding.
+  const masked = maskDigests(value);
+  const text = masked.replace(/\s+/g, " ").trim();
   const lead = leadExcerpt(text, max);
-  if (lead.text || text.length <= max) return lead;
+  if (lead.text || text.length <= max) return { text: lead.text, shortened: lead.shortened || masked !== value };
   // Masking can lengthen a cut ("a/b" becomes "[omitted]"), so the cut leaves room for it.
   const cut = text.slice(0, Math.floor(max * 0.9));
   const word = cut.lastIndexOf(" ");

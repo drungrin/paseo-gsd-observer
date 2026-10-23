@@ -94,7 +94,9 @@ Goal: Prove the storage assumptions before product work; if any of this fails, s
 
 ## Wave 2 — walking skeleton
 
-Goal: On the web app an authorized user registers one invoice end to end.
+Goal: On the web app an authorized user registers one invoice
+end to end, with the manual-declaration notice.
+Review depth: full
 
 \`\`\`text
 ## Wave 9 — fenced example, not a wave
@@ -153,6 +155,11 @@ title: Fix wave 1 cycle 1 review findings in T002
 wave: 3
 deps: [T002]
 status: blocked`, "T004 — Fix wave 1 cycle 1 review findings in T002") },
+  { path: ".project/tasks/T006-pin-member-base.md", content: task(`id: T006
+title: "Pin member base 9e8d7c6b5a49382716059e8d7c6b5a4938271605 for tenant 123e4567-e89b-42d3-a456-426614174000 #42"
+wave: 2
+status: pending
+repo: github.com`, "T006 — Pin the member base") },
   { path: ".project/tasks/T005-renamed.md", content: task(`id: T050
 title: A task whose recorded id differs from its file name
 wave: 2
@@ -198,4 +205,103 @@ title: Show a conflict banner when the server copy changed
 wave: 1
 deps: [T001]
 status: pending`, "T002 — Show a conflict banner when the server copy changed") },
+];
+
+const waveReview = (wave: number, cycle: number, verdict: string, tasks: readonly (readonly [string, "pass" | "fail"])[], extra = "") => `# Review — wave ${wave}, cycle ${cycle}
+
+<!-- Only for an explicitly assigned current-product review, also record:
+Wave verdict: pass
+-->
+Wave verdict: ${verdict}
+Cycle: ${cycle}
+Depth: full
+Tasks reviewed: ${tasks.length}
+${extra}
+${tasks.map(([id, result]) => `## ${id} — A reviewed task: ${result}\n\n- ✅ evidence line\n`).join("\n")}`;
+
+const wavePanel = (wave: number, cycle: number, families: string, actionable: number) => `# Wave panel\nMode: named\nWave: ${wave}\nCycle: ${cycle}\nFamilies: ${families}\nActionable: ${actionable}\nWarnings: 2\nConflicts: 0\n\n## Actionable\n\n- F1\n`;
+const recoveryBase = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+
+/** The fork's named gpt and muse panels, per-family panel files in both naming styles, a build recovery and a discussion. */
+export const forkReviewFiles: readonly FixtureFile[] = [
+  { path: ".project/review/wave-1.cycle1.md", content: waveReview(1, 1, "blocked", [["T001", "pass"], ["T002", "fail"]], "Repair evidence: receipt `/tmp/gsd-path-caps/repair.json` (`review_findings.py repair-evidence --wave 1`)") },
+  { path: ".project/review/wave-1.cycle1.panel.md", content: wavePanel(1, 1, "gpt, muse", 2) },
+  { path: ".project/review/wave-1.cycle1.panel.gpt.md", content: "# Panel — gpt\n" },
+  { path: ".project/review/wave-1.cycle1.panel.muse.md", content: "# Panel — muse\n" },
+  { path: ".project/review/wave-1.cycle2.md", content: waveReview(1, 2, "pass", [["T001", "pass"], ["T002", "pass"], ["T004", "pass"]]) },
+  // A cycle still being written has no verdict yet and replaces nothing.
+  { path: ".project/review/wave-1.cycle3.md", content: "# Review — wave 1, cycle 3\n\nWave verdict:\nCycle: 3\n" },
+  { path: ".project/review/wave-2.cycle1.panel.md", content: wavePanel(2, 1, "gpt, muse", 0) },
+  { path: ".project/review/PLAN-PANEL.md", content: "# Plan panel\nMode: named\nFamilies: gpt, muse\nActionable: 0\nWarnings: 1\nConflicts: 0\n" },
+  { path: ".project/review/plan-panel-gpt.md", content: "# Plan panel — gpt\n" },
+  { path: ".project/review/PLAN-PANEL.muse.md", content: "# Plan panel — muse\n" },
+  { path: `.project/plan/build-recovery-${recoveryBase}/review/wave-1.cycle1.md`, content: waveReview(1, 1, "pass", [["T001", "pass"]]) },
+  { path: `.project/plan/build-recovery-${recoveryBase}/review/PLAN-PANEL.md`, content: "# Plan panel\nFamilies: gpt, muse\nActionable: 1\nWarnings: 4\nConflicts: 0\n" },
+  { path: ".project/plan/build-recovery-not-a-sha/review/wave-1.cycle1.md", content: waveReview(1, 1, "pass", []) },
+  { path: ".project/discuss/ANSWERS.md", content: `# GSD Path Discussion — Answers
+
+<!-- Written by $gsd-path-discuss.
+## Answer A999 — 2026-10-01 — commented out
+- **Follow-up**: required
+-->
+
+## Answer A001 — 2026-10-05 — storage account
+- **Question**: Which storage account keeps the invoice files, given \`az storage account list --account-key abc\` from /home/ana/acme?
+- **Status**: NEEDS-USER
+- **Next owner**: user
+- **Target artifact**: .project/intent/INTENT.md
+- **Follow-up**: required
+
+## Answer A002 — 2026-10-05 — retention
+- **Question**: How long is the XML retained?
+- **Status**: final
+- **Next owner**: gsd-path-plan
+- **Target artifact**: none
+- **Follow-up**: required
+
+## Answer A003 — 2026-10-06 — retention, revised
+- **Supersedes**: A002
+- **Question**: How long is the XML retained after the ruling?
+- **Status**: working
+- **Follow-up**: required
+
+## Answer A004 — 2026-10-06 — naming
+- **Question**: What is the container called, per \`az storage container list --account-key abc\`?
+- **Status**: final
+- **Follow-up**: required
+
+## Answer A005 — 2026-10-07 — answered
+- **Question**: Is the runtime floor raised?
+- **Status**: final
+- **Follow-up**: none
+
+## Disposition X001 — 2026-10-08
+- **Answer**: A004
+- **Status**: applied
+` },
+];
+
+/** Upstream deep reviews with lenses, the final review, gap reviews and patch findings. */
+export const upstreamReviewFiles: readonly FixtureFile[] = [
+  { path: ".project/review/wave-1.cycle1.contract.md", content: waveReview(1, 1, "pass", [["T001", "pass"]]).replace("Depth: full", "Depth: deep\nLens: contract") },
+  { path: ".project/review/wave-1.cycle1.adversarial.md", content: waveReview(1, 1, "blocked", [["T001", "fail"]]).replace("Depth: full", "Depth: deep\nLens: adversarial") },
+  { path: ".project/review/wave-1.cycle2.adversarial.md", content: waveReview(1, 2, "pass", [["T001", "pass"]]).replace("Depth: full", "Depth: deep\nLens: adversarial") },
+  { path: ".project/review/FINAL.md", content: `# Final Review — notes-app
+
+Reviewed HEAD: c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00
+Overall verdict: blocked
+
+## Success criteria
+
+### SC1 — Notes written offline reach the server
+- **Verdict**: met
+- **Check**: \`npm test -- sync\`
+
+### SC2 — A conflict shows a banner
+- **Verdict**: not-met
+- **Finding**: the banner never renders
+` },
+  { path: ".project/review/final-gap-1.md", content: "# Gap Review — 1: project Verify\n\nReviewed HEAD: c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00\nGap verdict: pass\nRisk: project Verify\n\n## Output\n\n### stdout\n" },
+  { path: ".project/review/PATCH-FINDINGS.md", content: "# Patch findings\n" },
+  { path: ".project/review/reviewer-notes.md", content: "# Notes\n" },
 ];

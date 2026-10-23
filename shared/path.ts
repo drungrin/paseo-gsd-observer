@@ -21,7 +21,7 @@ export const PATH_WARNINGS = [
   "state-unavailable", "state-malformed", "log-unavailable",
   "roadmap-unavailable", "roadmap-malformed", "milestone-not-in-roadmap",
   "plan-unavailable", "plan-malformed", "tasks-unavailable", "task-malformed", "task-id-conflict", "task-duplicate",
-  "next-unavailable", "evidence-limited",
+  "next-unavailable", "reviews-unavailable", "reviews-malformed", "questions-unavailable", "questions-malformed", "evidence-limited",
 ] as const;
 export const PathWarningSchema = z.enum(PATH_WARNINGS);
 
@@ -126,6 +126,83 @@ export const PathTasksSchema = z.object({
   if (value.waves.reduce((total, wave) => total + wave.tasks.length, value.unassigned.length) > 512) context.addIssue({ code: "custom", message: "too many tasks" });
 });
 
+/** Review panel families are open-ended ("muse" exists only in a fork), so any lowercase name passes. */
+const FamilySchema = z.string().regex(/^[a-z][a-z0-9-]{0,31}$/);
+const FileNameSchema = z.string().regex(/^(?=.{1,200}$)[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*\.md$/);
+
+export const PathPanelSchema = z.object({
+  families: z.array(FamilySchema).max(16),
+  actionable: CountSchema.nullable(),
+  warnings: CountSchema.nullable(),
+  conflicts: CountSchema.nullable(),
+  /** Families whose own panel file was observed beside the summary. */
+  familyFiles: z.array(FamilySchema).max(16),
+}).strict();
+
+export const PathWaveReviewSchema = z.object({
+  wave: z.number().int().nonnegative().max(9_999),
+  cycle: z.number().int().nonnegative().max(9_999),
+  /** "contract" or "adversarial" for deep reviews, from the file name. */
+  lens: PathTokenSchema.nullable(),
+  verdict: PathTokenSchema.nullable(),
+  depth: PathTokenSchema.nullable(),
+  tasksReviewed: CountSchema.nullable(),
+  tasks: z.array(z.object({ id: TaskIdSchema, verdict: z.enum(["pass", "fail"]) }).strict()).max(512),
+  /** A later cycle of the same wave and lens recorded a pass or blocked verdict. */
+  superseded: z.boolean(),
+  panel: PathPanelSchema.nullable(),
+}).strict();
+
+export const PathCriterionSchema = z.object({
+  id: z.string().regex(/^SC\d{1,4}$/).nullable(),
+  text: ProseSchema(240).nullable(),
+  verdict: PathTokenSchema.nullable(),
+}).strict();
+
+export const PathReviewSetSchema = z.object({
+  waves: z.array(PathWaveReviewSchema).max(256),
+  planPanel: PathPanelSchema.nullable(),
+  final: z.object({ verdict: PathTokenSchema.nullable(), criteria: z.array(PathCriterionSchema).max(128) }).strict().nullable(),
+  gaps: z.array(z.object({ number: z.number().int().nonnegative().max(9_999), verdict: PathTokenSchema.nullable(), risk: ProseSchema(200).nullable() }).strict()).max(64),
+  patchFindings: z.boolean(),
+  /** Review files with no recognized name, listed by name only. */
+  otherFiles: z.array(FileNameSchema).max(64),
+}).strict();
+
+export const PathRecoverySchema = z.object({
+  /** The first seven characters of the recovery's base commit, from its folder name. */
+  base: z.string().regex(/^[0-9a-f]{7}$/),
+  date: DateSchema.nullable(),
+  /** The phase the recovery reopened, as its log entry records it. */
+  kind: PathTokenSchema.nullable(),
+  reviews: PathReviewSetSchema,
+}).strict();
+
+export const PathReviewsSchema = z.object({
+  availability: z.enum(["available", "absent", "unavailable"]),
+  current: PathReviewSetSchema,
+  recoveries: z.array(PathRecoverySchema).max(32),
+  limited: z.boolean(),
+}).strict();
+
+export const PathQuestionSchema = z.object({
+  id: z.string().regex(/^A\d{3,6}$/),
+  date: DateSchema.nullable(),
+  topic: ProseSchema(200).nullable(),
+  question: ProseSchema(400).nullable(),
+  status: PathTokenSchema.nullable(),
+  owner: ProseSchema(120).nullable(),
+  target: ProseSchema(200).nullable(),
+}).strict();
+
+export const PathQuestionsSchema = z.object({
+  /** "absent" is normal: discuss/ANSWERS.md exists only after a discussion. */
+  availability: z.enum(["available", "absent", "unavailable"]),
+  pending: z.array(PathQuestionSchema).max(128),
+  counts: z.object({ answers: CountSchema, pending: CountSchema, closed: CountSchema }).strict(),
+  limited: z.boolean(),
+}).strict();
+
 export const BoardPathSchema = z.object({
   /** "unsupported": `.project/STATE.md` names another GSD Path pipeline format, so nothing else is parsed. */
   setup: z.enum(["started", "not-started", "unsupported"]),
@@ -134,7 +211,9 @@ export const BoardPathSchema = z.object({
   roadmap: PathRoadmapSchema,
   next: PathNextSchema.nullable(),
   tasks: PathTasksSchema,
-  warnings: z.array(PathWarningSchema).max(16),
+  reviews: PathReviewsSchema,
+  questions: PathQuestionsSchema,
+  warnings: z.array(PathWarningSchema).max(20),
 }).strict();
 
 export type BoardPath = z.infer<typeof BoardPathSchema>;
@@ -146,3 +225,10 @@ export type PathTasks = z.infer<typeof PathTasksSchema>;
 export type PathTask = z.infer<typeof PathTaskSchema>;
 export type PathWave = z.infer<typeof PathWaveSchema>;
 export type PathWarning = z.infer<typeof PathWarningSchema>;
+export type PathPanel = z.infer<typeof PathPanelSchema>;
+export type PathWaveReview = z.infer<typeof PathWaveReviewSchema>;
+export type PathReviewSet = z.infer<typeof PathReviewSetSchema>;
+export type PathRecovery = z.infer<typeof PathRecoverySchema>;
+export type PathReviews = z.infer<typeof PathReviewsSchema>;
+export type PathQuestion = z.infer<typeof PathQuestionSchema>;
+export type PathQuestions = z.infer<typeof PathQuestionsSchema>;

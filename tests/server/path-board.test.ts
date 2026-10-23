@@ -1,10 +1,12 @@
+import { chmod } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readAllowedInventory } from "../../server/allowed-reader";
 import { buildBoardSnapshot } from "../../server/board-snapshot";
 import { buildPath } from "../../server/path-board";
 import { resolveWorkspaceRoot } from "../../server/workspace-root";
 import { BoardSnapshotSchema } from "../../shared/board-rpc";
-import { forkFiles, forkState, upstreamFiles } from "../fixtures/path-fixtures";
+import { forkFiles, forkReviewFiles, forkState, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
 import type { FixtureFile } from "../fixtures/gsd-fixtures";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 
@@ -56,6 +58,27 @@ describe("GSD Path detection", () => {
     expect(snapshot).toMatchObject({ flavor: "gsd-path", availability: "unsupported", warnings: ["unsupported"], path: { setup: "unsupported", state: { availability: "unavailable", project: null }, tasks: { availability: "unavailable", waves: [] } } });
   });
 
+  // Root reads a mode-000 file anyway, so the check only means something for another user.
+  it.skipIf(process.getuid?.() === 0)("keeps GSD Core when .project/STATE.md cannot be opened", async () => {
+    const workspace = await FixtureWorkspace.create([{ path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Safe\n" }, { path: ".project/STATE.md", content: forkState() }]);
+    try {
+      await chmod(join(workspace.root, ".project", "STATE.md"), 0o000);
+      expect(await resolveWorkspaceRoot(workspace.root)).toMatchObject({ available: true, flavor: "gsd-core" });
+    } finally {
+      await chmod(join(workspace.root, ".project", "STATE.md"), 0o644);
+      await workspace.cleanup();
+    }
+  });
+
+  it("reads branches only when no segment can be a host or a commit", async () => {
+    const hostile = forkState().replace("branch: feature/milestone-001", "branch: 9e8d7c6b5a49382716059e8d7c6b5a4938271605").replace("default_branch: main", "default_branch: git.corp.example.com");
+    const { snapshot } = await snapshotOf(replaced(forkFiles, ".project/STATE.md", hostile));
+    expect(snapshot.path?.state).toMatchObject({ branch: null, defaultBranch: null });
+    expect(JSON.stringify(snapshot)).not.toMatch(/corp\.example|9e8d7c6/);
+    const release = forkState().replace("branch: feature/milestone-001", "branch: release/1.2");
+    expect((await snapshotOf(replaced(forkFiles, ".project/STATE.md", release))).snapshot.path?.state.branch).toBe("release/1.2");
+  });
+
   it("refuses a linked .project and a linked state file without following them", async () => {
     const elsewhere = await FixtureWorkspace.create(forkFiles);
     const linked = await FixtureWorkspace.create([{ path: ".gsd-path/runtime.json", content: "{}\n" }]);
@@ -74,7 +97,7 @@ describe("GSD Path allowlist", () => {
     const { inventory } = await snapshotOf(forkFiles);
     expect(inventory.artifacts.map((artifact) => artifact.key).sort()).toEqual([
       "ROADMAP.md", "STATE.md", "next/STATE.md", "plan/PLAN.md",
-      "tasks/T001-pin-runtime-version.md", "tasks/T002-add-deployment-check.md", "tasks/T003-register-invoices.md", "tasks/T004-fix-wave-1-cycle-1.md", "tasks/T005-renamed.md",
+      "tasks/T001-pin-runtime-version.md", "tasks/T002-add-deployment-check.md", "tasks/T003-register-invoices.md", "tasks/T004-fix-wave-1-cycle-1.md", "tasks/T005-renamed.md", "tasks/T006-pin-member-base.md",
     ]);
     expect(inventory.watchDirectories).toEqual(["plan", "next", "tasks"]);
     expect(inventory.warnings).toEqual([]);
@@ -87,7 +110,7 @@ describe("GSD Path allowlist", () => {
     expect(snapshot.path?.timeline.logEntries).toBe(4000);
     const { snapshot: oversize } = await snapshotOf(replaced(forkFiles, ".project/STATE.md", forkState({}, "x".repeat(1024 * 1024))));
     expect(oversize).toMatchObject({ availability: "unknown", warnings: ["oversize"], path: { setup: "started", state: { availability: "unavailable" }, warnings: expect.arrayContaining(["state-unavailable"]) } });
-    expect(oversize.path?.tasks.counts.total).toBe(5);
+    expect(oversize.path?.tasks.counts.total).toBe(6);
   });
 
   it("refuses linked task files and keeps the rest", async () => {
@@ -96,7 +119,7 @@ describe("GSD Path allowlist", () => {
       await workspace.createSymlink(".project/tasks/T009-linked.md", `${workspace.root}/.project/tasks/T001-pin-runtime-version.md`);
       const path = buildPath(await readAllowedInventory(workspace.root));
       expect(path.warnings).toContain("tasks-unavailable");
-      expect(path.tasks.counts.total).toBe(5);
+      expect(path.tasks.counts.total).toBe(6);
     } finally { await workspace.cleanup(); }
   });
 });
@@ -138,20 +161,25 @@ describe("GSD Path projections", () => {
   it("joins PLAN.md waves with task files and counts recorded statuses", async () => {
     const tasks = (await snapshotOf(forkFiles)).snapshot.path!.tasks;
     expect(tasks).toMatchObject({ availability: "available", planObserved: true, currentWave: 1, limited: false, unassigned: [] });
-    expect(tasks.counts).toEqual({ total: 5, done: 2, inProgress: 1, pending: 1, failed: 0, blocked: 1, other: 0 });
+    expect(tasks.counts).toEqual({ total: 6, done: 2, inProgress: 1, pending: 2, failed: 0, blocked: 1, other: 0 });
     expect(tasks.waves.map(({ number, name, inPlan, current }) => ({ number, name, inPlan, current }))).toEqual([
       { number: 1, name: "risk burn-down", inPlan: true, current: true },
       { number: 2, name: "walking skeleton", inPlan: true, current: false },
       { number: 3, name: null, inPlan: false, current: false },
     ]);
     expect(tasks.waves[0].goal).toBe("Prove the storage assumptions before product work; if any of this fails, stop before wave 2.");
+    // A wrapped goal is read to the end of its paragraph, stopping at the next labelled field.
+    expect(tasks.waves[1]).toMatchObject({ goal: "On the web app an authorized user registers one invoice end to end, with the manual-declaration notice.", goalShortened: false });
     const [first, second] = tasks.waves[0].tasks;
     expect(first).toEqual({ id: "T001", title: "Pin the runtime version and add its guard test", status: "done", wave: 1, deps: [], supersedes: [], repo: "web", files: 2, idConflict: false });
     expect(second).toMatchObject({ id: "T002", status: "in-progress", deps: ["T001"], repo: "web", files: 1 });
     expect(tasks.waves[1].tasks).toEqual([
       { id: "T003", title: "Register invoices from the import screen", status: "pending", wave: 2, deps: ["T001", "T002"], supersedes: ["T001"], repo: "web", files: 0, idConflict: false },
       expect.objectContaining({ id: "T005", status: "done", idConflict: true }),
+      expect.objectContaining({ id: "T006", repo: null }),
     ]);
+    // Quotes keep " #42" in the value; commit hashes and UUIDs are masked.
+    expect(tasks.waves[1].tasks[2].title).toBe("Pin member base [omitted] for tenant [omitted] #42");
   });
 
   it("projects upstream's branch names and single-milestone layout the same way", async () => {
@@ -178,5 +206,81 @@ describe("GSD Path projections", () => {
     expect(path.warnings).toEqual(expect.arrayContaining(["state-malformed", "plan-malformed", "task-malformed"]));
     expect(path.tasks).toMatchObject({ availability: "available", planObserved: false });
     expect(path.tasks.waves.every((wave) => !wave.inPlan)).toBe(true);
+  });
+});
+
+describe("GSD Path reviews", () => {
+  it("reads review, recovery and discussion files within the allowlist", async () => {
+    const { inventory } = await snapshotOf([...forkFiles, ...forkReviewFiles]);
+    const keys = inventory.artifacts.map((artifact) => artifact.key);
+    expect(keys).toEqual(expect.arrayContaining(["discuss/ANSWERS.md", "review/wave-1.cycle1.md", "review/plan-panel-gpt.md", "plan/build-recovery-0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c/review/PLAN-PANEL.md"]));
+    expect(keys.some((key) => key.includes("not-a-sha") || key.startsWith("build/") || key.startsWith("program/"))).toBe(false);
+    expect(inventory.watchDirectories).toEqual(["plan", "next", "tasks", "review", "discuss", "plan/build-recovery-0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c", "plan/build-recovery-0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c/review"]);
+  });
+
+  it("projects the fork's wave cycles, panels and per-family files, superseding only by a settled later cycle", async () => {
+    const reviews = (await snapshotOf([...forkFiles, ...forkReviewFiles])).snapshot.path!.reviews;
+    expect(reviews).toMatchObject({ availability: "available", limited: false });
+    const { waves, planPanel, otherFiles } = reviews.current;
+    expect(waves.map(({ wave, cycle, verdict, superseded, tasksReviewed }) => ({ wave, cycle, verdict, superseded, tasksReviewed }))).toEqual([
+      { wave: 1, cycle: 1, verdict: "blocked", superseded: true, tasksReviewed: 2 },
+      { wave: 1, cycle: 2, verdict: "pass", superseded: false, tasksReviewed: 3 },
+      { wave: 1, cycle: 3, verdict: null, superseded: false, tasksReviewed: null },
+      { wave: 2, cycle: 1, verdict: null, superseded: false, tasksReviewed: null },
+    ]);
+    expect(waves[0]).toMatchObject({ depth: "full", lens: null, tasks: [{ id: "T001", verdict: "pass" }, { id: "T002", verdict: "fail" }], panel: { families: ["gpt", "muse"], actionable: 2, warnings: 2, conflicts: 0, familyFiles: ["gpt", "muse"] } });
+    expect(waves[3].panel).toMatchObject({ actionable: 0, familyFiles: [] });
+    expect(planPanel).toEqual({ families: ["gpt", "muse"], actionable: 0, warnings: 1, conflicts: 0, familyFiles: ["gpt", "muse"] });
+    expect(otherFiles).toEqual([]);
+    expect(JSON.stringify(reviews)).not.toMatch(/gsd-path-caps|review_findings/);
+  });
+
+  it("dates a recovery's set-aside reviews from its log entry", async () => {
+    const { recoveries } = (await snapshotOf([...forkFiles, ...forkReviewFiles])).snapshot.path!.reviews;
+    expect(recoveries).toEqual([{ base: "0f1e2d3", date: "2026-10-08", kind: "plan", reviews: expect.objectContaining({
+      waves: [expect.objectContaining({ wave: 1, cycle: 1, verdict: "pass", superseded: false })],
+      planPanel: { families: ["gpt", "muse"], actionable: 1, warnings: 4, conflicts: 0, familyFiles: [] },
+    }) }]);
+  });
+
+  it("projects upstream's deep-review lenses, final review, gap reviews and unrecognized files", async () => {
+    const reviews = (await snapshotOf([...upstreamFiles, ...upstreamReviewFiles])).snapshot.path!.reviews;
+    expect(reviews.current.waves.map(({ cycle, lens, verdict, superseded, depth }) => ({ cycle, lens, verdict, superseded, depth }))).toEqual([
+      { cycle: 1, lens: "adversarial", verdict: "blocked", superseded: true, depth: "deep" },
+      { cycle: 1, lens: "contract", verdict: "pass", superseded: false, depth: "deep" },
+      { cycle: 2, lens: "adversarial", verdict: "pass", superseded: false, depth: "deep" },
+    ]);
+    expect(reviews.current.final).toEqual({ verdict: "blocked", criteria: [
+      { id: "SC1", text: "Notes written offline reach the server", verdict: "met" },
+      { id: "SC2", text: "A conflict shows a banner", verdict: "not-met" },
+    ] });
+    expect(reviews.current.gaps).toEqual([{ number: 1, verdict: "pass", risk: "project Verify" }]);
+    expect(reviews.current).toMatchObject({ patchFindings: true, otherFiles: ["reviewer-notes.md"], planPanel: null });
+    expect(reviews.recoveries).toEqual([]);
+  });
+
+  it("reports no review folder as absent and a linked one as unavailable", async () => {
+    expect((await snapshotOf(upstreamFiles)).snapshot.path!.reviews).toMatchObject({ availability: "absent", current: { waves: [] } });
+    const elsewhere = await FixtureWorkspace.create(upstreamReviewFiles);
+    const workspace = await FixtureWorkspace.create(upstreamFiles);
+    try {
+      await workspace.createSymlink(".project/review", `${elsewhere.root}/.project/review`);
+      const path = buildPath(await readAllowedInventory(workspace.root));
+      expect(path.reviews.availability).toBe("unavailable");
+      expect(path.warnings).toContain("reviews-unavailable");
+    } finally { await Promise.all([elsewhere.cleanup(), workspace.cleanup()]); }
+  });
+});
+
+describe("GSD Path questions", () => {
+  it("lists answers still awaiting a follow-up and closes disposed or superseded ones", async () => {
+    const questions = (await snapshotOf([...forkFiles, ...forkReviewFiles])).snapshot.path!.questions;
+    expect(questions.counts).toEqual({ answers: 5, pending: 1, closed: 2 });
+    expect(questions.pending).toEqual([{ id: "A001", date: "2026-10-05", topic: "storage account", question: expect.stringContaining("Which storage account keeps the invoice files"), status: "needs-user", owner: "user", target: ".project/intent/INTENT.md" }]);
+    expect(questions.pending[0].question).not.toMatch(/account-key|\/home/);
+  });
+
+  it("is absent until a discussion records an answer", async () => {
+    expect((await snapshotOf(forkFiles)).snapshot.path!.questions).toEqual({ availability: "absent", pending: [], counts: { answers: 0, pending: 0, closed: 0 }, limited: false });
   });
 });

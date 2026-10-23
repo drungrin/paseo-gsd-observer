@@ -38,16 +38,24 @@ const isPathInstall = async (root: string) => {
   return false;
 };
 
-/** The `pipeline:` value in the frontmatter of a regular `.project/STATE.md`, read from its first bytes without following links. */
-async function pipelineMarker(projectRoot: string): Promise<string | null | "refused"> {
+/**
+ * The `pipeline:` value in the frontmatter of a regular `.project/STATE.md`, read from its first bytes. The file is opened
+ * without following links or blocking on a FIFO, must be the file that was checked, and must still resolve inside the root
+ * after the read. An unreadable file names no pipeline; the reader reports it later if GSD Path is installed.
+ */
+async function pipelineMarker(root: string, projectRoot: string): Promise<string | null | "refused"> {
   const file = join(projectRoot, "STATE.md");
   const before = await lstat(file).catch(() => null);
   if (!before) return null;
   if (!before.isFile() || before.isSymbolicLink()) return "refused";
-  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)).catch(() => null);
+  if (!handle) return null;
   try {
+    const descriptor = await handle.stat();
+    if (!descriptor.isFile() || descriptor.dev !== before.dev || descriptor.ino !== before.ino) return "refused";
     const buffer = Buffer.alloc(MARKER_BYTES);
     const { bytesRead } = await handle.read(buffer, 0, MARKER_BYTES, 0);
+    if (!isStrictDescendant(root, await realpath(file))) return "refused";
     const lines = buffer.subarray(0, bytesRead).toString("utf8").replace(/^﻿/, "").split(/\r?\n/);
     if (lines[0]?.trim() !== "---") return null;
     for (const line of lines.slice(1)) {
@@ -55,6 +63,8 @@ async function pipelineMarker(projectRoot: string): Promise<string | null | "ref
       const value = /^pipeline:\s*([^\s#]+)/.exec(line)?.[1];
       if (value) return value;
     }
+    return null;
+  } catch {
     return null;
   } finally {
     await handle.close().catch(() => undefined);
@@ -70,7 +80,7 @@ async function pathRoot(root: string): Promise<{ planningRoot: string } | "refus
   const project = await containedDirectory(root, ".project");
   if (project === "refused") return (await lstat(join(root, ".project")))?.isFile() ? null : "refused";
   if (project === "absent") return await isPathInstall(root) ? { planningRoot: join(root, ".project") } : null;
-  const marker = await pipelineMarker(project.path);
+  const marker = await pipelineMarker(root, project.path);
   if (marker === "refused") return "refused";
   return marker?.startsWith("gsd-path/") || (!marker && await isPathInstall(root)) ? { planningRoot: project.path } : null;
 }

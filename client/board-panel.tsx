@@ -13,6 +13,8 @@ import { TodosView } from "./todos-components.js";
 import { ParkingLotView } from "./parking-lot-components.js";
 import { DebugView } from "./debug-components.js";
 import { PathOverviewView } from "./path-overview-components.js";
+import { PathQuestionsView } from "./path-questions-components.js";
+import { PathReviewsView } from "./path-reviews-components.js";
 import { PathTasksView } from "./path-tasks-components.js";
 import { boardRpc, type BoardRequest, type BoardResponse } from "../shared/board-rpc.js";
 import { createBoardState, type BoardReadingState } from "./board-state.js";
@@ -83,6 +85,8 @@ export function BoardPanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
     parking: () => <ParkingLotView {...view} />,
     debug: () => <DebugView {...view} />,
     tasks: () => <PathTasksView {...view} />,
+    reviews: () => <PathReviewsView {...view} />,
+    questions: () => <PathQuestionsView {...view} />,
   };
   return <View onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
     <BoardTabs tabs={tabs} activeTab={activeTab} focusedTab={focusedTab} onSelect={(tab) => setTabSelection({ workspaceId, tab })} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />

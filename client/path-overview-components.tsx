@@ -76,6 +76,21 @@ function ProgressCard({ path, theme }: ThemeProps & { path: BoardPath }) {
   </Card>;
 }
 
+/** The latest review verdicts and pending questions, so the overview shows what needs attention without opening every tab. */
+function AttentionCard({ path, theme }: ThemeProps & { path: BoardPath }) {
+  const { reviews, questions } = path;
+  const latest = reviews.current.waves.filter((review) => !review.superseded && review.verdict).at(-1);
+  const final = reviews.current.final;
+  return <Card title="Reviews and questions" source=".project/review · .project/discuss" theme={theme} attention={latest?.verdict === "blocked" || final?.verdict === "blocked" || questions.counts.pending > 0}>
+    <View style={{ gap: 10 }}>
+      <Field label="Latest wave" value={latest ? `Wave ${latest.wave} · cycle ${latest.cycle} · ${tokenLabel(latest.verdict)}` : reviews.availability === "unavailable" ? "Reviews could not be read" : "No wave review recorded"} theme={theme} />
+      <Field label="Final review" value={final ? tokenLabel(final.verdict) : "Not recorded"} theme={theme} />
+      <Field label="Questions" value={questions.availability === "available" ? `${plural(questions.counts.pending, "pending follow-up")}` : questions.availability === "absent" ? "No discussion recorded" : "Could not be read"} theme={theme} />
+    </View>
+    <Text style={smallStyle(theme)}>Verdicts and answers as recorded; the Reviews and Questions tabs show the details.</Text>
+  </Card>;
+}
+
 function MilestoneRow({ milestone, theme }: ThemeProps & { milestone: PathMilestone }) {
   return <View role="listitem" style={{ gap: 4, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: milestone.current ? theme.colors.accent : "transparent", backgroundColor: milestone.current ? theme.colors.surface2 ?? theme.colors.surface0 : "transparent" }}>
     <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
@@ -112,6 +127,7 @@ export function PathOverviewView({ state, onRefresh, theme, compact = false }: T
         <View style={column}><StateCard path={path} theme={theme} /><TimelineCard path={path} theme={theme} /></View>
         <View style={column}>
           <ProgressCard path={path} theme={theme} />
+          <AttentionCard path={path} theme={theme} />
           {path.next && <Card title="Next milestone" source=".project/next/STATE.md" theme={theme}>
             <Text style={textStyle(theme)}>{path.next.milestone ?? "Name not recorded"}</Text>
             <Text style={textStyle(theme, true)}>Planned ahead: {tokenLabel(path.next.phase)} · {tokenLabel(path.next.status)}</Text>

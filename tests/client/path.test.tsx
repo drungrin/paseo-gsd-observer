@@ -10,11 +10,15 @@ vi.mock("react", async (importOriginal) => {
 import { BOARD_TABS, PATH_TABS, tabForKey, tabsFor } from "../../client/board-tabs";
 import type { BoardViewState } from "../../client/board-components";
 import { PathOverviewView } from "../../client/path-overview-components";
+import { PathQuestionsView } from "../../client/path-questions-components";
+import { cycleTitle, panelSummary, PathReviewsView, recoveryTitle } from "../../client/path-reviews-components";
 import { PathTasksView, taskFacts } from "../../client/path-tasks-components";
-import type { BoardPath, PathTask } from "../../shared/path";
+import type { BoardPath, PathReviewSet, PathTask, PathWaveReview } from "../../shared/path";
 
 const theme = { colors: { surface0: "#fff", surface1: "#f8fafc", surface2: "#eef2f5", foreground: "#12151c", foregroundMuted: "#626c76", accent: "#316ec4", accentForeground: "#fff", border: "#d8dde4", statusWarning: "#b7791f" } };
 const task = (overrides: Partial<PathTask> = {}): PathTask => ({ id: "T001", title: "Pin the runtime version", status: "done", wave: 1, deps: [], supersedes: [], repo: "web", files: 2, idConflict: false, ...overrides });
+const cycle = (overrides: Partial<PathWaveReview> = {}): PathWaveReview => ({ wave: 1, cycle: 1, lens: null, verdict: "pass", depth: "full", tasksReviewed: 2, tasks: [{ id: "T001", verdict: "pass" }, { id: "T002", verdict: "pass" }], superseded: false, panel: null, ...overrides });
+const reviewSet = (overrides: Partial<PathReviewSet> = {}): PathReviewSet => ({ waves: [], planPanel: null, final: null, gaps: [], patchFindings: false, otherFiles: [], ...overrides });
 const pathData = (overrides: Partial<BoardPath> = {}): BoardPath => ({
   setup: "started",
   state: { availability: "available", project: "acme-orchestrator", milestone: "invoice-evidence", phase: "build", status: "active", branch: "feature/milestone-001", defaultBranch: "main", integration: "pull-request", integrationDefault: "direct", shipped: false,
@@ -36,6 +40,22 @@ const pathData = (overrides: Partial<BoardPath> = {}): BoardPath => ({
       { number: 2, name: "walking skeleton", goal: null, goalShortened: false, inPlan: true, current: false, tasks: [task({ id: "T003", status: "pending", wave: 2, supersedes: ["T001"], repo: null, files: 0 })] },
       { number: 3, name: null, goal: null, goalShortened: false, inPlan: false, current: false, tasks: [task({ id: "T004", status: "blocked", wave: 3 })] },
     ] },
+  reviews: { availability: "available", limited: false,
+    current: reviewSet({
+      waves: [
+        cycle({ verdict: "blocked", superseded: true, tasks: [{ id: "T001", verdict: "pass" }, { id: "T002", verdict: "fail" }], panel: { families: ["gpt", "muse"], actionable: 2, warnings: 1, conflicts: 0, familyFiles: ["gpt", "muse"] } }),
+        cycle({ cycle: 2, tasksReviewed: 3 }),
+        cycle({ wave: 2, cycle: 1, lens: "adversarial", depth: "deep", verdict: "blocked", tasks: [{ id: "T003", verdict: "fail" }], tasksReviewed: 1 }),
+      ],
+      planPanel: { families: ["gpt"], actionable: 0, warnings: 1, conflicts: 0, familyFiles: [] },
+      final: { verdict: "blocked", criteria: [{ id: "SC1", text: "Invoices are kept immutably", verdict: "met" }, { id: "SC2", text: null, verdict: "not-met" }] },
+      gaps: [{ number: 1, verdict: "pass", risk: "project Verify" }], patchFindings: true, otherFiles: ["reviewer-notes.md"],
+    }),
+    recoveries: [{ base: "0f1e2d3", date: "2026-10-08", kind: "plan", reviews: reviewSet({ waves: [cycle({ verdict: "pass" })] }) }] },
+  questions: { availability: "available", limited: false, counts: { answers: 5, pending: 2, closed: 2 }, pending: [
+    { id: "A001", date: "2026-10-05", topic: "storage account", question: "Which storage account keeps the invoice files?", status: "needs-user", owner: "user", target: ".project/intent/INTENT.md" },
+    { id: "A002", date: null, topic: null, question: null, status: "final", owner: null, target: null },
+  ] },
   warnings: ["roadmap-malformed", "task-id-conflict"],
   ...overrides,
 });
@@ -59,10 +79,11 @@ describe("GSD Path tabs", () => {
   it("lists each pipeline's own tabs, and only Overview before a workspace is read", () => {
     expect(tabsFor(undefined).map((tab) => tab.id)).toEqual(["overview"]);
     expect(tabsFor("gsd-core")).toBe(BOARD_TABS);
-    expect(tabsFor("gsd-path").map((tab) => tab.label)).toEqual(["Overview", "Tasks"]);
+    expect(tabsFor("gsd-path").map((tab) => tab.label)).toEqual(["Overview", "Tasks", "Reviews", "Questions"]);
     expect(tabForKey("overview", "ArrowRight", PATH_TABS)).toBe("tasks");
-    expect(tabForKey("tasks", "ArrowRight", PATH_TABS)).toBe("overview");
-    expect(tabForKey("overview", "End", PATH_TABS)).toBe("tasks");
+    expect(tabForKey("questions", "ArrowRight", PATH_TABS)).toBe("overview");
+    expect(tabForKey("overview", "ArrowLeft", PATH_TABS)).toBe("questions");
+    expect(tabForKey("overview", "End", PATH_TABS)).toBe("questions");
   });
 });
 
@@ -78,6 +99,7 @@ describe("GSD Path overview", () => {
       "Planned ahead: Research · Active",
       "0 of 2 milestones recorded as shipped", "M001 · invoice-evidence · Current", "Depends on M001",
       "Some roadmap milestone entries are ambiguous and were left out.",
+      "Wave 2 · cycle 1 · Blocked", "Final review", "2 pending follow-ups",
     ]) expect(content).toContain(expected);
     expect(content).not.toContain("Recorded as shipped");
   });
@@ -125,5 +147,61 @@ describe("GSD Path tasks", () => {
     expect(text(tasksView(absent, true))).toContain("No plan or task files yet. GSD Path writes them in the plan phase.");
     absent.tasks = { ...absent.tasks, availability: "unavailable" };
     expect(text(tasksView(absent))).toContain("The plan and task files could not be read safely.");
+  });
+});
+
+const reviewsView = (path?: BoardPath, compact = false) => expand(PathReviewsView({ state: state(path), theme, compact, onRefresh: vi.fn() }));
+const questionsView = (path?: BoardPath, compact = false) => text(expand(PathQuestionsView({ state: state(path), theme, compact, onRefresh: vi.fn() })));
+
+describe("GSD Path reviews tab", () => {
+  it("shows the final review, gaps, plan panel and wave cycles with superseded and failing ones marked", () => {
+    const tree = reviewsView();
+    const content = text(tree);
+    for (const expected of [
+      "Overall verdict: Blocked", "SC1 · Invoices are kept immutably", "Met", "SC2 · Criterion not safely displayable", "Not met",
+      "Gap 1 · project Verify", "Plan panel", "gpt · 0 actionable · 1 warning · 0 conflicts",
+      "Wave 1", "Cycle 1", "Verdict: Blocked", "Superseded by a later cycle", "1 pass · 1 fail", "Failed: T002", "Panel: gpt, muse · 2 actionable · 1 warning · 0 conflicts · family files: gpt, muse",
+      "Cycle 2", "3 tasks reviewed", "Cycle 1 · Adversarial lens", "Depth: Deep",
+      "Patch findings are recorded in review/PATCH-FINDINGS.md.", "Other review files: reviewer-notes.md",
+      "Show 1 review set set aside by build recovery",
+    ]) expect(content).toContain(expected);
+    // Set-aside reviews stay collapsed until asked for.
+    expect(content).not.toContain("Recovery from 0f1e2d3");
+    const toggle = nodes(tree).find((node) => node.type === "Pressable" && String(node.props?.accessibilityLabel).includes("set aside by build recovery"));
+    expect(toggle?.props?.accessibilityState).toEqual({ expanded: false });
+  });
+
+  it("labels cycles, panels and recoveries in reading order", () => {
+    expect(cycleTitle(cycle({ cycle: 3, lens: "contract" }))).toBe("Cycle 3 · Contract lens");
+    expect(panelSummary({ families: [], actionable: null, warnings: 1, conflicts: null, familyFiles: [] })).toBe("Families not recorded · 1 warning");
+    expect(recoveryTitle({ base: "0f1e2d3", date: "2026-10-08", kind: "plan", reviews: reviewSet() })).toBe("Recovery from 0f1e2d3 · 2026-10-08 · reopened Plan");
+    expect(recoveryTitle({ base: "0f1e2d3", date: null, kind: null, reviews: reviewSet() })).toBe("Recovery from 0f1e2d3");
+  });
+
+  it("explains absent, empty and unreadable reviews", () => {
+    const data = pathData();
+    data.reviews = { availability: "absent", current: reviewSet(), recoveries: [], limited: false };
+    expect(text(reviewsView(data, true))).toContain("No review folder yet. GSD Path writes reviews during build and ship.");
+    data.reviews = { ...data.reviews, availability: "available" };
+    expect(text(reviewsView(data))).toContain("No review files are recorded for the current milestone.");
+    data.reviews = { ...data.reviews, availability: "unavailable" };
+    expect(text(reviewsView(data))).toContain("The review files could not be read safely.");
+  });
+});
+
+describe("GSD Path questions tab", () => {
+  it("lists pending follow-ups with their status, owner and target", () => {
+    const content = questionsView();
+    for (const expected of ["Pending follow-ups", "A001 · storage account", "Answered 2026-10-05", "Which storage account keeps the invoice files?", "Needs user", "Next owner: user", "Target artifact: .project/intent/INTENT.md",
+      "A002", "The question is not safely displayable.", "Final"]) expect(content).toContain(expected);
+  });
+
+  it("explains no pending answers and no discussion", () => {
+    const data = pathData();
+    data.questions = { availability: "available", pending: [], counts: { answers: 3, pending: 0, closed: 3 }, limited: false };
+    expect(questionsView(data)).toContain("Every recorded answer is closed or needs no follow-up.");
+    data.questions = { ...data.questions, availability: "absent" };
+    expect(questionsView(data, true)).toContain("GSD Path writes discuss/ANSWERS.md when a discussion records an answer.");
+    expect(questionsView(pathData({ setup: "not-started" }))).toContain("No milestone started");
   });
 });

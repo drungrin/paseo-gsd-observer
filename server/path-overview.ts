@@ -4,9 +4,8 @@ import {
 } from "../shared/path.js";
 import type { AllowedInventory } from "./allowed-reader.js";
 import { redactPaths } from "../shared/locations.js";
-import { maskDigests } from "./document-text.js";
 import {
-  branchPattern, dashed, datePattern, firstLabelled, headings, milestoneIdPattern, PATH_PIPELINE, pathDocument, pathFrontmatter,
+  branchName, dashed, datePattern, firstLabelled, headings, labelledParagraph, milestoneIdPattern, PATH_PIPELINE, pathDocument, pathFrontmatter,
   proseLines, shortExcerpt, slugPattern, token, withoutComments, type PathFields,
 } from "./path-text.js";
 
@@ -79,15 +78,15 @@ export function buildState(reading: StateReading, entries: readonly LogEntry[] |
   const phase = token(values.get("phase"));
   const status = token(values.get("status"));
   const last = entries?.at(-1);
-  const masked = last?.text ? redactPaths(maskDigests(last.text)) : null;
+  const masked = last?.text ? redactPaths(last.text) : null;
   const event = shortExcerpt(masked, 640);
   const state: PathState = {
     availability: "available",
     project: pattern(values.get("project"), slugPattern),
     milestone: pattern(values.get("milestone"), slugPattern),
     phase, status,
-    branch: pattern(values.get("branch"), branchPattern),
-    defaultBranch: pattern(values.get("default_branch"), branchPattern),
+    branch: branchName(values.get("branch")),
+    defaultBranch: branchName(values.get("default_branch")),
     integration: token(values.get("integration")),
     integrationDefault: token(values.get("integration_default")),
     shipped: phase === "shipped" && status === "done",
@@ -118,7 +117,7 @@ export function buildRoadmap(inventory: AllowedInventory, currentMilestone: stri
     seen.add(lead);
     const slug = pattern(rest, slugPattern);
     if (!slug) warnings.add("roadmap-malformed");
-    const goal = firstLabelled(section.lines, "Goal");
+    const goal = labelledParagraph(section.lines, "Goal");
     const archive = firstLabelled(section.lines, "Archive", true);
     const depends = /^\[(.*)\]$/.exec(firstLabelled(section.lines, "Depends on", true) ?? "")?.[1].split(",").map((item) => item.trim()).filter((item) => milestoneIdPattern.test(item)) ?? [];
     const milestone: PathMilestone = {
