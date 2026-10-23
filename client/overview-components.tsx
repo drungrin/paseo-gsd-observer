@@ -63,6 +63,7 @@ export function phaseStations(roadmap: BoardOverview["roadmap"], limit = 16): { 
 
 
 type Flagged = { id: string; danger: boolean; text: string };
+const capitalized = (words: string) => `${words[0]?.toUpperCase() ?? ""}${words.slice(1)}`;
 const listed = (items: readonly string[]) => items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}` : items[0] ?? "";
 
 /** One line per kind of evidence: a single phase with its summary, several with their ids, the current one marked. */
@@ -93,7 +94,7 @@ export function coreNeeds(overview: BoardOverview, agent: WorkspaceAgent = null)
   if (debug.availability === "available" && debug.counts.unavailable > 0) unread.push(["some debug files", "debug"]);
   return [
     agent?.status === "needs_input" ? { tone: "warning", title: "An agent in this workspace is waiting for your input", detail: null, tab: null } satisfies Need : null,
-    unread.length ? { tone: "warning", title: `${listed(unread.map(([name]) => name))} could not be read`, detail: "Anything recorded there is not shown here.", tab: unread[0][1] } satisfies Need : null,
+    unread.length ? { tone: "warning", title: capitalized(`${listed(unread.map(([name]) => name))} could not be read`), detail: "Anything recorded there is not shown here.", tab: unread[0][1] } satisfies Need : null,
     flaggedNeed("UAT", "uat", uat, current),
     flaggedNeed("verification", "verification", verification, current),
     flaggedNeed("validation", "validation", validation, current),

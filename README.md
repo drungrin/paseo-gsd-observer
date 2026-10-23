@@ -2,9 +2,9 @@
 
 A read-only Paseo plugin for understanding the persisted state of a GSD project. It turns the selected workspace's current planning evidence into accessible, read-only tabs—without running GSD, creating worktrees, merging code, or declaring work complete. It reads both GSD Core projects (`.planning/`) and GSD Path projects (`.project/`), from the upstream package or a fork.
 
-![Overview tab showing STATE, roadmap progress, and requirements](docs/screenshots/overview.png)
+![Overview tab showing the current phase and its stages, what needs attention, the headline figures and where the money went](docs/screenshots/overview.png)
 
-Screenshots show a copy of the public [UniClipboard](https://github.com/UniClipboard/UniClipboard) project's planning, adapted for this showcase: some files were renamed or reformatted to GSD conventions, and the validation, UAT, parking-lot, and backlog TODO entries are illustrative. Project text appears in its original language.
+Screenshots show a copy of the public [UniClipboard](https://github.com/UniClipboard/UniClipboard) project's planning, adapted for this showcase: some files were renamed or reformatted to GSD conventions, and the validation, UAT, parking-lot, and backlog TODO entries are illustrative, as is the host usage behind the Timeline, Ledger and spend figures. Project text appears in its original language.
 
 ## What it shows
 
@@ -28,15 +28,17 @@ Host usage is read from the same session logs, and tokens and costs are counted 
 
 Each phase chip carries a short status line and a mark when the phase's evidence needs a look. Tabs carry small badges: plan summaries written, phases needing a look in UAT, Verification and Validation, pending TODOs and unresolved debug sessions.
 
-| Plans | Context |
+| Plans | Timeline |
 | --- | --- |
-| ![Plans tab showing the current phase's progress stages and plans](docs/screenshots/plans.png) | ![Context tab showing a phase boundary and numbered decisions](docs/screenshots/context.png) |
-| **Validation** | **Verification** |
-| ![Validation tab showing a per-task verification map and open sign-off items](docs/screenshots/validation.png) | ![Verification tab showing a phase whose report records an open gap and an unresolved human check](docs/screenshots/verification.png) |
-| **UAT** | **TODOs** |
-| ![UAT tab showing passing, failing, and pending acceptance tests](docs/screenshots/uat.png) | ![TODOs tab listing standalone TODO files by folder](docs/screenshots/todos.png) |
-| **Parking Lot** | **Debug** |
-| ![Parking Lot tab listing parked and absorbed backlog entries](docs/screenshots/parking-lot.png) | ![Debug tab listing sessions by recorded status](docs/screenshots/debug.png) |
+| ![Plans tab showing a phase's stage track, sub-checks, the selected plan's evidence and spend, and its plans wave by wave](docs/screenshots/plans.png) | ![Timeline tab showing the open phase's plans executing wave by wave on one time axis, with the orchestrator above](docs/screenshots/timeline.png) |
+| **Context** | **Validation** |
+| ![Context tab showing a phase boundary and numbered decisions](docs/screenshots/context.png) | ![Validation tab showing a per-task verification map and open sign-off items](docs/screenshots/validation.png) |
+| **Verification** | **UAT** |
+| ![Verification tab showing a phase whose report records an open gap and an unresolved human check](docs/screenshots/verification.png) | ![UAT tab showing passing, failing, and pending acceptance tests as a bar and one by one](docs/screenshots/uat.png) |
+| **TODOs** | **Parking Lot** |
+| ![TODOs tab listing standalone TODO files by folder](docs/screenshots/todos.png) | ![Parking Lot tab listing parked backlog entries](docs/screenshots/parking-lot.png) |
+| **Debug** | **Ledger** |
+| ![Debug tab listing sessions by recorded status](docs/screenshots/debug.png) | ![Ledger tab showing the workspace's host usage and models](docs/screenshots/ledger.png) |
 
 ### GSD Path workspaces
 

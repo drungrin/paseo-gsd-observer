@@ -449,7 +449,7 @@ describe("Overview needs", () => {
     expect(coreNeeds(data).at(-1)?.title).toBe("1 debug session not resolved");
     // Unreadable debug files make the count a lower bound and are named as unread.
     data.debug.counts = { ...data.debug.counts, unavailable: 1 };
-    expect(coreNeeds(data).map((need) => need.title)).toEqual(expect.arrayContaining(["some debug files could not be read", "At least 1 debug session not resolved"]));
+    expect(coreNeeds(data).map((need) => need.title)).toEqual(expect.arrayContaining(["Some debug files could not be read", "At least 1 debug session not resolved"]));
   });
 
   it("lists the needs and opens the tab each one is in, beside the live agent status", () => {
