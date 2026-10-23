@@ -20,7 +20,7 @@ export const LIMITS = {
 export type InventoryWarning = "absent" | "oversize" | "malformed" | "truncated" | "unsupported" | "containment-refused" | "unreadable" | "limit-reached" | "observation-limited" | "inconsistent";
 export type PhaseCheckKind = "research" | "spec" | "skeleton" | "security" | "patterns" | "ui-spec" | "ai-spec" | "plan-check" | "ui-check" | "validation" | "windows" | "deferred-items" | "ui-review" | "eval-review" | "coverage";
 /** GSD Path documents have their own kinds, so GSD Core projections never read them. */
-export type PathArtifactKind = "path-state" | "path-roadmap" | "path-plan" | "path-next-state" | "path-task" | "path-review" | "path-recovery-review" | "path-answers";
+export type PathArtifactKind = "path-state" | "path-roadmap" | "path-plan" | "path-next-state" | "path-task" | "path-review" | "path-recovery-review" | "path-answers" | "path-manifest";
 export type ArtifactKind = "roadmap" | "state" | "requirements" | "todo" | "debug" | "context" | "plan" | "summary" | "verification" | "uat" | "review" | PhaseCheckKind | PathArtifactKind;
 export type AllowedArtifact = { key: string; kind: ArtifactKind; phaseId?: string; bytes: Uint8Array; size: number };
 export type InventoryProblem = { phaseId?: string; kind?: ArtifactKind; warning: InventoryWarning };

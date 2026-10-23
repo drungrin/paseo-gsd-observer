@@ -6,13 +6,16 @@ import contribute, { createBoardService } from "../../index.server";
 import { readAllowedInventory } from "../../server/allowed-reader";
 import type { BoardResponse } from "../../shared/board-rpc";
 import { boardRpc } from "../../shared/board-rpc";
+import { ledgerRpc, usageRpc } from "../../shared/usage";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 
 describe("board RPC boundary", () => {
   it("reads the daemon workspaceDirectory from the production RPC context", async () => {
     const workspace = await FixtureWorkspace.create([{ path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Observed\n" }]);
     let handler: ((input: unknown, context: unknown) => unknown | Promise<unknown>) | undefined;
-    const cleanup = contribute({ handle(_contract: unknown, registered: (input: unknown, context: unknown) => unknown | Promise<unknown>) { handler = registered; } } as never);
+    const registered: string[] = [];
+    const cleanup = contribute({ handle(contract: { name: string }, candidate: (input: unknown, context: unknown) => unknown | Promise<unknown>) { registered.push(contract.name); if (contract.name === boardRpc.name) handler = candidate; } } as never);
+    expect(registered).toEqual(["gsd-observer.board", "gsd-observer.usage", "gsd-observer.ledger"]);
 
     const result = await handler?.(
       { workspaceId: "selected", intent: "refresh" },
@@ -27,6 +30,10 @@ describe("board RPC boundary", () => {
   it("rejects paths, extra keys, and oversized workspace IDs at the schema boundary", async () => {
     await expect(boardRpc.input.parseAsync({ workspaceId: "selected", intent: "refresh", root: "/tmp" })).rejects.toBeDefined();
     await expect(boardRpc.input.parseAsync({ workspaceId: "x".repeat(129), intent: "refresh" })).rejects.toBeDefined();
+    // Usage and the ledger take only the workspace id and a page; no path or session location reaches the server from the client.
+    await expect(usageRpc.input.parseAsync({ workspaceId: "selected", root: "/tmp" })).rejects.toBeDefined();
+    await expect(ledgerRpc.input.parseAsync({ workspaceId: "selected", offset: 0, limit: 501 })).rejects.toBeDefined();
+    await expect(ledgerRpc.input.parseAsync({ workspaceId: "selected", offset: 0, limit: 200, sessionDir: "/home" })).rejects.toBeDefined();
   });
 
   it("returns only cache metadata for status and never resolves or reads a workspace", async () => {

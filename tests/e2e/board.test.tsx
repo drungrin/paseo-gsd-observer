@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import ts from "typescript";
 
 vi.mock("react-native", () => ({
@@ -19,13 +19,21 @@ import { createBoardController } from "../../index.client";
 import { OverviewView } from "../../client/overview-components";
 import { PlansView } from "../../client/plans-components";
 import { PathOverviewView } from "../../client/path-overview-components";
+import { createUsageState } from "../../client/usage-controller";
 import { PathQuestionsView } from "../../client/path-questions-components";
 import { PathReviewsView } from "../../client/path-reviews-components";
 import { PathTasksView } from "../../client/path-tasks-components";
 import { createBoardService } from "../../index.server";
 import { boardRpc } from "../../shared/board-rpc";
 import { fixtureFiles } from "../fixtures/gsd-fixtures";
-import { forkFiles, forkReviewFiles, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
+import { forkFiles, forkReviewFiles, shippedFiles, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
+import { claudeTranscript, codexRollout } from "../fixtures/session-fixtures";
+import { createUsageIndex } from "../../server/usage-index";
+import { ledgerRpc, usageRpc } from "../../shared/usage";
+import { createUsageController } from "../../client/usage-controller";
+import { PathRoadmapView } from "../../client/path-roadmap-components";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { FakeHost } from "../helpers/fake-host";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 import { FakeWatcher } from "../helpers/fake-watcher";
@@ -82,7 +90,7 @@ describe("board tracer", () => {
       expect(controller.getState().snapshot).toMatchObject({ flavor: "gsd-path", availability: "available", freshness: "current", path: { setup: "started", state: { branch } } });
       expect(controller.getState().snapshot?.overview).toBeUndefined();
       for (const compact of [false, true]) {
-        expect(text(expand(PathOverviewView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(branch);
+        expect(text(expand(PathOverviewView({ state: controller.getState(), usage: createUsageState(), onRefresh: () => undefined, theme, compact })))).toContain(branch);
         expect(text(expand(PathTasksView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain("Wave 1");
         expect(text(expand(PathReviewsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(review);
         expect(text(expand(PathQuestionsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(question);
@@ -91,6 +99,39 @@ describe("board tracer", () => {
       await service.close();
       await workspace.cleanup();
     }
+  });
+
+  it("serves host usage split at the roadmap's ship dates, and the ledger on demand", async () => {
+    const workspace = await FixtureWorkspace.create(shippedFiles);
+    const sessions = join(workspace.root, "..", `${workspace.root.split("/").at(-1)}-sessions`);
+    const projects = join(sessions, "claude", "projects", workspace.root.replace(/[^A-Za-z0-9]/g, "-"));
+    await mkdir(projects, { recursive: true });
+    await writeFile(join(projects, "t.jsonl"), claudeTranscript(workspace.root), "utf8");
+    await mkdir(join(sessions, "codex"), { recursive: true });
+    await writeFile(join(sessions, "codex", "a.jsonl"), codexRollout(workspace.root), "utf8");
+    await writeFile(join(sessions, "daemon.json"), JSON.stringify({ prices: { "gpt-6-astra": { input: 100, cached: 10, output: 1000 } } }), "utf8");
+    const host = new FakeHost();
+    host.registerWorkspace("selected", workspace.root);
+    const service = createBoardService({ resolveWorkspace: async (id) => host.resolveWorkspace(id), usageIndex: createUsageIndex({ sessionDirs: [join(sessions, "codex"), join(sessions, "claude", "projects")], configPath: join(sessions, "daemon.json") }) });
+    host.handle(boardRpc, (input) => service.handle(input as never));
+    host.handle(usageRpc, (input) => service.usage(input as never));
+    host.handle(ledgerRpc, (input) => service.ledger(input as never));
+    const controller = createBoardController({ workspaceId: "selected", callBoardRpc: (input) => host.invoke(boardRpc, input, "selected") });
+    await controller.dispatch("refresh");
+    const usage = createUsageController({ workspaceId: "selected", callUsageRpc: (input) => host.invoke(usageRpc, input, "selected"), callLedgerRpc: (input) => host.invoke(ledgerRpc, input, "selected") });
+    await usage.load();
+    // Claude turns on 2026-09-01 predate M000's ship date (2026-09-05); Codex turns on 2026-09-10 go to the current M001.
+    expect(usage.getState().usage?.milestones).toEqual([{ id: "M000", turns: 2, tokens: 432, cost: null }, { id: "M001", turns: 2, tokens: 3150, cost: 0.28 }]);
+    const roadmap = text(expand(PathRoadmapView({ state: controller.getState(), usage: usage.getState(), onRefresh: () => undefined, theme })));
+    for (const expected of ["Shipped 2026-09-05", "11 of 12 tasks done", "2 turns", "$0.28 · 2 turns", "3k tokens"]) expect(roadmap).toContain(expected);
+    expect(usage.getState().ledger.loaded).toBe(false);
+    await usage.loadLedger();
+    expect(usage.getState().ledger).toMatchObject({ loaded: true, total: 4 });
+    usage.dispose();
+    controller.dispose();
+    await service.close();
+    await workspace.cleanup();
+    await rm(sessions, { recursive: true, force: true });
   });
 
   it("reads a real selected workspace only after the refresh intent", async () => {
@@ -147,7 +188,7 @@ describe("board tracer", () => {
   });
 
   it("keeps client and shared imports inside the read-only plugin boundary", async () => {
-    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "client/path-reviews-components.tsx", "client/path-questions-components.tsx", "shared/board-rpc.ts", "shared/path.ts"];
+    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "client/path-reviews-components.tsx", "client/path-questions-components.tsx", "client/path-roadmap-components.tsx", "client/path-ledger-components.tsx", "client/path-usage-components.tsx", "client/usage-controller.ts", "client/usage-format.ts", "shared/usage.ts", "shared/board-rpc.ts", "shared/path.ts"];
     const sources = await Promise.all(files.map(async (file) => ({ file, source: await readFile(file, "utf8") })));
     for (const { file, source } of sources) {
       const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

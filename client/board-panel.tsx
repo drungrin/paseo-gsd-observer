@@ -17,6 +17,10 @@ import { PathQuestionsView } from "./path-questions-components.js";
 import { PathReviewsView } from "./path-reviews-components.js";
 import { PathTasksView } from "./path-tasks-components.js";
 import { boardRpc, type BoardRequest, type BoardResponse } from "../shared/board-rpc.js";
+import { ledgerRpc, usageRpc } from "../shared/usage.js";
+import { createUsageController } from "./usage-controller.js";
+import { PathLedgerView } from "./path-ledger-components.js";
+import { PathRoadmapView } from "./path-roadmap-components.js";
 import { createBoardState, type BoardReadingState } from "./board-state.js";
 import type { BoardTheme } from "./board-components.js";
 
@@ -59,6 +63,10 @@ export function BoardPanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
   const callBoardRpc = useRpc(boardRpc);
   const controller = useMemo(() => createBoardController({ workspaceId, callBoardRpc }), [workspaceId, callBoardRpc]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  const callUsageRpc = useRpc(usageRpc);
+  const callLedgerRpc = useRpc(ledgerRpc);
+  const usageController = useMemo(() => createUsageController({ workspaceId, callUsageRpc, callLedgerRpc }), [workspaceId, callUsageRpc, callLedgerRpc]);
+  const usage = useSyncExternalStore(usageController.subscribe, usageController.getState, usageController.getState);
   const [tabSelection, setTabSelection] = useState<{ workspaceId: string; tab: BoardTab }>({ workspaceId, tab: "overview" });
   const [focusedTab, setFocusedTab] = useState<BoardTab | null>(null);
   const [showTable, setShowTable] = useState(false);
@@ -70,12 +78,16 @@ export function BoardPanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
   const selectedTab = tabSelection.workspaceId === workspaceId ? tabSelection.tab : "overview";
   const activeTab = tabs.some((tab) => tab.id === selectedTab) ? selectedTab : "overview";
   const compact = layout.compact || panelWidth !== null && panelWidth < 760;
-  const onRefresh = () => { void controller.dispatch("refresh"); };
+  // Usage is read only for GSD Path workspaces, apart from the snapshot; the ledger only when its tab asks for it.
+  const onRefresh = () => { void controller.dispatch("refresh"); if (flavor === "gsd-path") void usageController.load(); };
+  const onRefreshLedger = () => { onRefresh(); if (usage.ledger.loaded) void usageController.loadLedger(false); };
   useEffect(() => { controller.start(); void controller.dispatch("snapshot"); return () => controller.dispose(); }, [controller]);
+  useEffect(() => () => usageController.dispose(), [usageController]);
+  useEffect(() => { if (flavor === "gsd-path") void usageController.load(); }, [flavor, usageController]);
   useEffect(() => { setShowTable(false); }, [workspaceId]);
   const view = { state, theme: theme as BoardTheme, compact, onRefresh };
   const panels: Record<BoardTab, () => ReactNode> = {
-    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} /> : <OverviewView {...view} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
+    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} usage={usage} /> : <OverviewView {...view} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
     plans: () => <PlansView {...view} />,
     context: () => <ContextView {...view} />,
     validation: () => <ValidationView {...view} />,
@@ -84,9 +96,11 @@ export function BoardPanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
     todos: () => <TodosView {...view} />,
     parking: () => <ParkingLotView {...view} />,
     debug: () => <DebugView {...view} />,
+    roadmap: () => <PathRoadmapView {...view} usage={usage} />,
     tasks: () => <PathTasksView {...view} />,
     reviews: () => <PathReviewsView {...view} />,
     questions: () => <PathQuestionsView {...view} />,
+    ledger: () => <PathLedgerView {...view} usage={usage} onRefresh={onRefreshLedger} onLoadLedger={(more) => { void usageController.loadLedger(more); }} />,
   };
   return <View onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
     <BoardTabs tabs={tabs} activeTab={activeTab} focusedTab={focusedTab} onSelect={(tab) => setTabSelection({ workspaceId, tab })} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />

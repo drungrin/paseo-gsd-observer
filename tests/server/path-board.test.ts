@@ -6,7 +6,7 @@ import { buildBoardSnapshot } from "../../server/board-snapshot";
 import { buildPath } from "../../server/path-board";
 import { resolveWorkspaceRoot } from "../../server/workspace-root";
 import { BoardSnapshotSchema } from "../../shared/board-rpc";
-import { forkFiles, forkReviewFiles, forkState, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
+import { forkFiles, forkReviewFiles, forkState, shippedFiles, upstreamFiles, upstreamReviewFiles } from "../fixtures/path-fixtures";
 import type { FixtureFile } from "../fixtures/gsd-fixtures";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 
@@ -194,6 +194,16 @@ describe("GSD Path projections", () => {
     expect(path.tasks.waves).toEqual([expect.objectContaining({ number: 1, name: "sync engine", current: true, tasks: [expect.objectContaining({ id: "T001", repo: null, files: 1 }), expect.objectContaining({ id: "T002", status: "pending" })] })]);
     expect(path.timeline.entries.map((entry) => entry.phase)).toEqual(["define", "plan", "build"]);
     expect(path.warnings).toEqual([]);
+  });
+
+  it("reads each shipped milestone's ship date and task counts from its archive manifest, and nothing else archived", async () => {
+    const { inventory, snapshot } = await snapshotOf(shippedFiles);
+    expect(inventory.artifacts.filter((artifact) => artifact.key.startsWith("archive/")).map((artifact) => artifact.key)).toEqual(["archive/000-billing-foundation/MANIFEST.md"]);
+    expect(snapshot.path!.roadmap.milestones.map(({ id, status, shipped, tasksDone, tasksTotal, waveCount, archived, integrated, current }) => ({ id, status, shipped, tasksDone, tasksTotal, waveCount, archived, integrated, current }))).toEqual([
+      { id: "M000", status: "shipped", shipped: "2026-09-05", tasksDone: 11, tasksTotal: 12, waveCount: 3, archived: true, integrated: true, current: false },
+      { id: "M001", status: "active", shipped: null, tasksDone: null, tasksTotal: null, waveCount: null, archived: false, integrated: false, current: true },
+    ]);
+    expect(inventory.watchDirectories).toContain("archive");
   });
 
   it("records a shipped milestone as recorded, and a milestone missing from the roadmap", async () => {

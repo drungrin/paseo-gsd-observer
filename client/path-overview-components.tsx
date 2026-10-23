@@ -1,8 +1,10 @@
 import { Text, View } from "react-native";
-import type { BoardPath, PathMilestone } from "../shared/path.js";
+import type { BoardPath } from "../shared/path.js";
 import type { BoardViewState } from "./board-components.js";
 import { ProgressMeter } from "./overview-components.js";
-import { Badge, borderColor, Card, Count, PATH_WARNING_COPY, PathFrame, plural, SetupNotice, smallStyle, textStyle, tokenLabel, type ThemeProps } from "./path-components.js";
+import { borderColor, Card, Count, PATH_WARNING_COPY, PathFrame, plural, SetupNotice, smallStyle, textStyle, tokenLabel, type ThemeProps } from "./path-components.js";
+import { UsageCard } from "./path-usage-components.js";
+import type { UsageViewState } from "./usage-controller.js";
 
 function Field({ label, value, detail, theme }: ThemeProps & { label: string; value: string; detail?: string | null }) {
   return <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 16 }}>
@@ -91,37 +93,10 @@ function AttentionCard({ path, theme }: ThemeProps & { path: BoardPath }) {
   </Card>;
 }
 
-function MilestoneRow({ milestone, theme }: ThemeProps & { milestone: PathMilestone }) {
-  return <View role="listitem" style={{ gap: 4, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: milestone.current ? theme.colors.accent : "transparent", backgroundColor: milestone.current ? theme.colors.surface2 ?? theme.colors.surface0 : "transparent" }}>
-    <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
-      <Text style={{ ...textStyle(theme), flex: 1, minWidth: 0, fontWeight: milestone.current ? "600" : "400" }}>{milestone.id} · {milestone.slug ?? "Name not recorded"}{milestone.current ? " · Current" : ""}</Text>
-      <Text style={smallStyle(theme, false)}>{tokenLabel(milestone.status)}</Text>
-    </View>
-    {milestone.goal && <Text style={smallStyle(theme)}>{milestone.goal}</Text>}
-    {(milestone.depends.length > 0 || milestone.archived || milestone.integrated) && <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
-      {milestone.depends.length > 0 && <Badge label={`Depends on ${milestone.depends.join(", ")}`} theme={theme} />}
-      {milestone.archived && <Badge label="Archive recorded" theme={theme} />}
-      {milestone.integrated && <Badge label="Integrated commit recorded" theme={theme} />}
-    </View>}
-  </View>;
-}
-
-function RoadmapCard({ path, theme }: ThemeProps & { path: BoardPath }) {
-  const { roadmap } = path;
-  return <Card title="Roadmap" source=".project/ROADMAP.md" theme={theme}>
-    {roadmap.availability === "available" ? <>
-      <Text style={textStyle(theme, true)}>{roadmap.counts.shipped} of {plural(roadmap.counts.total, "milestone")} recorded as shipped{roadmap.counts.abandoned ? ` · ${roadmap.counts.abandoned} abandoned` : ""}</Text>
-      {roadmap.milestones.length ? <View role="list" accessibilityLabel="Roadmap milestones" style={{ gap: 3, marginHorizontal: -12 }}>{roadmap.milestones.map((milestone) => <MilestoneRow key={milestone.id} milestone={milestone} theme={theme} />)}</View>
-        : <Text style={textStyle(theme, true)}>No milestones are listed in this roadmap.</Text>}
-      <Text style={smallStyle(theme)}>Milestone statuses as recorded in the roadmap, not verified integration.</Text>
-    </> : <Text style={textStyle(theme, true)}>{roadmap.availability === "absent" ? "This project runs a single milestone; no program roadmap is recorded." : "The roadmap could not be read."}</Text>}
-  </Card>;
-}
-
-export function PathOverviewView({ state, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; onRefresh(): void; compact?: boolean }) {
+export function PathOverviewView({ state, usage, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; usage: UsageViewState; onRefresh(): void; compact?: boolean }) {
   const path = state.snapshot?.path;
   const column = { flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" as const : 0, minWidth: 0, gap: 20 };
-  return <PathFrame title="Project overview" description="GSD Path pipeline state, phase history, task progress and roadmap for the selected workspace." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact}>
+  return <PathFrame title="Project overview" description="GSD Path pipeline state, phase history, task progress and host usage for the selected workspace." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : <>
       <View style={{ flexDirection: compact ? "column" : "row", alignItems: "stretch", gap: 20 }}>
         <View style={column}><StateCard path={path} theme={theme} /><TimelineCard path={path} theme={theme} /></View>
@@ -132,9 +107,9 @@ export function PathOverviewView({ state, onRefresh, theme, compact = false }: T
             <Text style={textStyle(theme)}>{path.next.milestone ?? "Name not recorded"}</Text>
             <Text style={textStyle(theme, true)}>Planned ahead: {tokenLabel(path.next.phase)} · {tokenLabel(path.next.status)}</Text>
           </Card>}
-          <RoadmapCard path={path} theme={theme} />
         </View>
       </View>
+      <UsageCard view={usage} theme={theme} />
       {path.warnings.length > 0 && <View style={{ gap: 4 }}>{path.warnings.map((warning) => <Text key={warning} style={smallStyle(theme)}>{PATH_WARNING_COPY[warning]}</Text>)}</View>}
     </>}
   </PathFrame>;

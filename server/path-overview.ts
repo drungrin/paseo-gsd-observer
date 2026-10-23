@@ -18,6 +18,23 @@ export const emptyTimeline = (): PathTimeline => ({ availability: "unavailable",
 export const emptyRoadmap = (availability: PathRoadmap["availability"]): PathRoadmap => ({ availability, milestones: [], counts: { total: 0, shipped: 0, active: 0, pending: 0, abandoned: 0, other: 0 } });
 
 const artifact = (inventory: AllowedInventory, kind: "path-state" | "path-roadmap" | "path-next-state") => inventory.artifacts.find((item) => item.kind === kind);
+const archivePath = /^(?:\.\/)?\.project\/archive\/(\d{3,6}-[a-z0-9][a-z0-9-]{0,127})\/?$/;
+const manifestCounts = /^Waves:\s*(\d+)\s+Tasks:\s*(\d+)\s+done\s*\/\s*(\d+)\s+total/;
+
+type Manifest = Pick<PathMilestone, "shipped" | "tasksDone" | "tasksTotal" | "waveCount">;
+const noManifest = (): Manifest => ({ shipped: null, tasksDone: null, tasksTotal: null, waveCount: null });
+
+/** The ship summary of an archived milestone, as the GSD Path daemon reads `MANIFEST.md`. */
+function manifest(inventory: AllowedInventory, archive: string | null): Manifest {
+  const folder = archive ? archivePath.exec(archive)?.[1] : null;
+  const document = folder ? inventory.artifacts.find((item) => item.kind === "path-manifest" && item.key === `archive/${folder}/MANIFEST.md`) : null;
+  const text = document ? pathDocument(document.bytes) : null;
+  const lines = text === null ? null : proseLines(withoutComments(text));
+  if (!lines) return noManifest();
+  const shipped = /^(\d{4}-\d{2}-\d{2})/.exec(firstLabelled(lines, "Shipped") ?? "")?.[1] ?? null;
+  const counts = lines.map((line) => manifestCounts.exec(line.trim())).find(Boolean);
+  return { shipped, tasksDone: counts ? Number(counts[2]) : null, tasksTotal: counts ? Number(counts[3]) : null, waveCount: counts ? Number(counts[1]) : null };
+}
 const problem = (inventory: AllowedInventory, kind: "path-state" | "path-roadmap" | "path-next-state") => inventory.problems.find((item) => item.kind === kind);
 
 export type StateReading = { setup: BoardPath["setup"]; fields: PathFields | null; body: string | null };
@@ -127,6 +144,7 @@ export function buildRoadmap(inventory: AllowedInventory, currentMilestone: stri
       archived: archive !== null && archive !== "null",
       integrated: integratedCommit.test(firstLabelled(section.lines, "Integrated", true) ?? ""),
       current: slug !== null && slug === currentMilestone,
+      ...manifest(inventory, archive),
     };
     const valid = PathMilestoneSchema.safeParse(milestone).success ? milestone : { ...milestone, goal: null };
     if (!PathMilestoneSchema.safeParse(valid).success) { warnings.add("roadmap-malformed"); continue; }

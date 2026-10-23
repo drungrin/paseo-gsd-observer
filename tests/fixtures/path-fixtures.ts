@@ -309,3 +309,42 @@ Overall verdict: blocked
   { path: ".project/review/deploy-10.0.3.17.md", content: "# Notes\n" },
   { path: ".project/review/ghp_abcdefABCDEF1234567890abcdef.md", content: "# Notes\n" },
 ];
+
+/** A program whose first milestone shipped: its roadmap entry names the archive, whose manifest records the ship date. */
+export const shippedFiles: readonly FixtureFile[] = [
+  ...forkFiles.filter((file) => file.path !== ".project/ROADMAP.md"),
+  { path: ".project/ROADMAP.md", content: `# Roadmap — Acme program
+
+## Milestones
+
+### M000 — billing-foundation
+
+Goal: Contracts and billing profiles exist.
+Depends on: []
+Status: shipped
+Archive: .project/archive/000-billing-foundation/
+Integrated: 4f2c1d9a8b7e
+
+### M001 — invoice-evidence
+
+Goal: An authorized user registers an invoice whose original file is kept unchanged.
+Depends on: [M000]
+Status: active
+Archive: null
+Integrated: null
+` },
+  { path: ".project/archive/000-billing-foundation/MANIFEST.md", content: `# Archive — 000-billing-foundation
+
+<!-- Written at ship time by $gsd-path-ship final.
+Shipped: 1999-01-01
+-->
+
+Milestone: billing-foundation
+Shipped: 2026-09-05
+Final verdict: all criteria met; project verify passed
+Waves: 3  Tasks: 11 done / 12 total  Review cycles used: 1/2/1
+Carried forward: none
+` },
+  { path: ".project/archive/000-billing-foundation/review/FINAL.md", content: "# Final Review\nOverall verdict: pass\n" },
+  { path: ".project/archive/not-an-archive/MANIFEST.md", content: "Shipped: 2026-01-01\n" },
+];

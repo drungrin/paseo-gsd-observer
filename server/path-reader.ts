@@ -20,9 +20,12 @@ const RECOVERY_BYTES = 8 * 1024 * 1024;
 export const PATH_TASK_FILE = /^T\d{3,6}-[a-z0-9][a-z0-9-]*\.md$/;
 export const PATH_REVIEW_FILE = /^(?=.{1,200}$)[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*\.md$/;
 export const PATH_RECOVERY_DIRECTORY = /^build-recovery-[0-9a-f]{40}$/;
+// The runtime's archive folder rule: `.project/archive/<NNN>-<slug>/`, written once at ship.
+export const PATH_ARCHIVE_DIRECTORY = /^\d{3,6}-[a-z0-9][a-z0-9-]{0,127}$/;
+const ARCHIVES = 128;
 export const PATH_DOCUMENTS: readonly (readonly [string, PathArtifactKind])[] = [["STATE.md", "path-state"], ["ROADMAP.md", "path-roadmap"], ["plan/PLAN.md", "path-plan"], ["next/STATE.md", "path-next-state"], ["discuss/ANSWERS.md", "path-answers"]];
-export const PATH_DIRECTORIES = ["plan", "next", "tasks", "review", "discuss"] as const;
-const directoryKind: Record<typeof PATH_DIRECTORIES[number], PathArtifactKind> = { plan: "path-plan", next: "path-next-state", tasks: "path-task", review: "path-review", discuss: "path-answers" };
+export const PATH_DIRECTORIES = ["plan", "next", "tasks", "review", "discuss", "archive"] as const;
+const directoryKind: Record<typeof PATH_DIRECTORIES[number], PathArtifactKind> = { plan: "path-plan", next: "path-next-state", tasks: "path-task", review: "path-review", discuss: "path-answers", archive: "path-manifest" };
 
 /** Whether a `.project/`-relative path is an allowlisted document or a folder that holds them; the watcher ignores everything else. */
 export function isPathEvidence(relative: string): boolean {
@@ -32,6 +35,7 @@ export function isPathEvidence(relative: string): boolean {
   if (parts.length === 2 && parts[0] === "tasks") return PATH_TASK_FILE.test(parts[1]);
   if (parts.length === 2 && parts[0] === "review") return PATH_REVIEW_FILE.test(parts[1]);
   if (parts.length === 2 && parts[0] === "plan" && PATH_RECOVERY_DIRECTORY.test(parts[1])) return true;
+  if (parts[0] === "archive") return PATH_ARCHIVE_DIRECTORY.test(parts[1]) && (parts.length === 2 || (parts.length === 3 && parts[2] === "MANIFEST.md"));
   if (parts.length === 2) return PATH_DOCUMENTS.some(([key]) => key === relative);
   if (parts[0] !== "plan" || !PATH_RECOVERY_DIRECTORY.test(parts[1]) || parts[2] !== "review") return false;
   return parts.length === 3 || (parts.length === 4 && PATH_REVIEW_FILE.test(parts[3]));
@@ -86,6 +90,18 @@ export async function readPathInventory(root: string, projectRoot: string): Prom
   for (const directory of PATH_DIRECTORIES) await safeFolder(directory, directoryKind[directory]);
   if (watchDirectories.includes("tasks")) await readFolder("tasks", PATH_TASK_FILE, "path-task", TASK_FILES);
   if (watchDirectories.includes("review")) await readFolder("review", PATH_REVIEW_FILE, "path-review", REVIEW_FILES);
+  if (watchDirectories.includes("archive")) {
+    // Only each shipped milestone's manifest is read; the archived evidence itself stays history.
+    const listing = await listDirectory(join(projectRoot, "archive"));
+    if (listing.warning) problem("path-manifest", listing.warning);
+    const archives = listing.entries.filter((name) => PATH_ARCHIVE_DIRECTORY.test(name)).sort();
+    if (archives.length > ARCHIVES) problem("path-manifest", "limit-reached");
+    for (const name of archives.slice(0, ARCHIVES)) {
+      const warning = await validateSafeDirectory(projectRoot, join(projectRoot, "archive", name));
+      if (warning) { if (warning !== "absent") problem("path-manifest", warning); continue; }
+      await read(join("archive", name, "MANIFEST.md"), "path-manifest");
+    }
+  }
   if (watchDirectories.includes("plan")) {
     const listing = await listDirectory(join(projectRoot, "plan"));
     if (listing.warning) problem("path-recovery-review", listing.warning);

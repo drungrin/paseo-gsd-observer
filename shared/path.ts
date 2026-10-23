@@ -70,6 +70,11 @@ export const PathMilestoneSchema = z.object({
   archived: z.boolean(),
   integrated: z.boolean(),
   current: z.boolean(),
+  /** From the archive's MANIFEST.md, written at ship. */
+  shipped: DateSchema.nullable(),
+  tasksDone: CountSchema.nullable(),
+  tasksTotal: CountSchema.nullable(),
+  waveCount: CountSchema.nullable(),
 }).strict();
 
 export const PathRoadmapSchema = z.object({

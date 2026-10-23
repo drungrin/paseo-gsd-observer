@@ -80,3 +80,20 @@ export function SetupNotice({ setup, theme }: ThemeProps & { setup: "not-started
   if (setup === "unsupported") return <Card title="Unsupported GSD Path format" theme={theme} attention><Text style={textStyle(theme, true)}>The state file names a pipeline format this observer does not read. Nothing else is shown, so no field is guessed.</Text></Card>;
   return <Card title="Project evidence unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable GSD Path state was found for this workspace.</Text></Card>;
 }
+
+export type TableColumn = { label: string; width: number; numeric?: boolean };
+
+/** A scrollable data table: one row header, then cells; numeric columns align right in tabular figures. */
+export function DataTable({ label, columns, rows, theme }: ThemeProps & { label: string; columns: readonly TableColumn[]; rows: readonly (readonly string[])[] }) {
+  const cell = (column: TableColumn, header = false) => ({ ...smallStyle(theme, header), fontSize: header ? 12 : 13, fontWeight: header ? "600" as const : "400" as const, width: column.width, paddingHorizontal: 6, textAlign: column.numeric ? "right" as const : "left" as const, fontVariant: column.numeric ? ["tabular-nums" as const] : undefined });
+  return <ScrollView horizontal nestedScrollEnabled style={{ flexGrow: 0 }}>
+    <View role="table" accessibilityLabel={label} style={{ minWidth: columns.reduce((total, column) => total + column.width, 0) }}>
+      <View role="row" style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderColor: borderColor(theme) }}>
+        {columns.map((column) => <Text key={column.label} role="columnheader" style={cell(column, true)}>{column.label}</Text>)}
+      </View>
+      {rows.map((row, index) => <View key={index} role="row" style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderColor: borderColor(theme) }}>
+        {row.map((value, column) => <Text key={column} role={column === 0 ? "rowheader" : "cell"} style={{ ...cell(columns[column]), color: theme.colors.foreground }}>{value}</Text>)}
+      </View>)}
+    </View>
+  </ScrollView>;
+}
