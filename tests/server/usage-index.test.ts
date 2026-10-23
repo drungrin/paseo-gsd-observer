@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createUsageIndex } from "../../server/usage-index";
-import { claudeTranscript, codexRollout } from "../fixtures/session-fixtures";
+import { ACTIVITY_BUCKET_MS, ACTIVITY_LIMIT } from "../../shared/usage";
+import { claudeTranscript, codexRollout, codexWorker } from "../fixtures/session-fixtures";
 
 let base: string;
 let root: string;
@@ -51,6 +52,41 @@ describe("usage index", () => {
     // Claude turns on 2026-09-01 fall before M001's ship date; Codex turns on 2026-09-10 are after it.
     expect(usage.milestones).toEqual([{ id: "M001", turns: 2, tokens: 432, cost: null }, { id: "M002", turns: 2, tokens: 3150, cost: 0.28 }]);
     expect((await index().usage(query({ current: null }))).milestones).toEqual([{ id: null, turns: 4, tokens: 3582, cost: 0.28 }]);
+  });
+
+  it("spends per task and counts turns in ten-minute buckets per lane", async () => {
+    await write(join(base, "codex", "2026", "09", "10", "worker.jsonl"), codexWorker(root, "T007"));
+    const usage = await index().usage(query());
+    expect(usage.tasks).toEqual([{ id: "T007", turns: 2, tokens: 3150, cost: 0.28, durationS: 60, first: "2026-09-10T10:00:31.000Z", last: "2026-09-10T10:01:01.000Z" }]);
+    expect(usage.activity).toEqual([
+      { lane: "orchestrator", at: "2026-09-01T09:00:00.000Z", turns: 1, cost: null },
+      { lane: "subagents", at: "2026-09-01T09:00:00.000Z", turns: 1, cost: null },
+      // Buckets keep four decimals, as the ledger does; totals round to cents.
+      { lane: "orchestrator", at: "2026-09-10T10:00:00.000Z", turns: 2, cost: 0.279 },
+      { lane: "T007", at: "2026-09-10T10:00:00.000Z", turns: 2, cost: 0.279 },
+    ]);
+    expect(usage.activityLimited).toBe(false);
+    expect(usage.totals.turns).toBe(6);
+  });
+
+  it("places a turn whose time does not parse nowhere, and still counts it", async () => {
+    await write(join(base, "codex", "2026", "09", "10", "worker.jsonl"), codexWorker(root, "T007").replace('"timestamp":"2026-09-10T10:01:01.000Z"', '"timestamp":"soon"'));
+    const usage = await index().usage(query());
+    expect(usage.availability).toBe("available");
+    expect(usage.tasks).toEqual([expect.objectContaining({ id: "T007", turns: 2, first: "2026-09-10T10:00:31.000Z", last: "2026-09-10T10:00:31.000Z" })]);
+    expect(usage.activity.filter((bucket) => bucket.lane === "T007")).toEqual([{ lane: "T007", at: "2026-09-10T10:00:00.000Z", turns: 1, cost: 0.114 }]);
+  });
+
+  it("keeps the newest activity buckets when there are more than the limit, and says so", async () => {
+    const start = Date.UTC(2026, 9, 1);
+    const lines = Array.from({ length: ACTIVITY_LIMIT + 5 }, (_, index) => response(`msg_${index}`, new Date(start + index * ACTIVITY_BUCKET_MS).toISOString(), 1));
+    await write(join(base, "claude", "projects", slug(root), "long.jsonl"), `${lines.join("\n")}\n`);
+    const usage = await index().usage(query());
+    expect(usage.activityLimited).toBe(true);
+    expect(usage.activity).toHaveLength(ACTIVITY_LIMIT);
+    expect(usage.activity.at(-1)?.at).toBe(new Date(start + (ACTIVITY_LIMIT + 4) * ACTIVITY_BUCKET_MS).toISOString());
+    // Totals still count every turn.
+    expect(usage.totals.turns).toBe(ACTIVITY_LIMIT + 5 + 4);
   });
 
   it("counts a response repeated by a forked subagent transcript once", async () => {

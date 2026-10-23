@@ -2,19 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { readFile, rm } from "node:fs/promises";
 import ts from "typescript";
 
-vi.mock("react-native", () => ({
-  View: "View",
-  Text: "Text",
-  Pressable: "Pressable",
-  ScrollView: "ScrollView",
-  FlatList: "FlatList",
-  Platform: { OS: "web" },
-}));
+vi.mock("react-native", async () => (await import("../helpers/react-native-mock")).reactNativeMock);
 vi.mock("@getpaseo/plugin/client/react-native", () => ({ ScrollView: "PaseoScrollView" }));
-vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return { ...original, useState: (value: unknown) => [value, vi.fn()] };
-});
+vi.mock("react", async (importOriginal) => (await import("../helpers/react-native-mock")).reactHooksMock(await importOriginal<typeof import("react")>()));
+import { expand } from "../helpers/react-native-mock";
 import { createBoardController } from "../../index.client";
 import { OverviewView } from "../../client/overview-components";
 import { PlansView } from "../../client/plans-components";
@@ -40,13 +31,6 @@ import { FakeWatcher } from "../helpers/fake-watcher";
 
 const theme = { colors: { surface0: "#000", foreground: "#fff", foregroundMuted: "#aaa", accent: "#0af", accentForeground: "#000" } };
 type Node = { type?: unknown; props?: Record<string, unknown> };
-const expand = (node: unknown): unknown => {
-  if (Array.isArray(node)) return node.map(expand);
-  if (!node || typeof node !== "object") return node;
-  const value = node as Node;
-  if (typeof value.type === "function") return expand((value.type as (props: Record<string, unknown>) => unknown)(value.props ?? {}));
-  return { ...value, props: { ...value.props, children: expand(value.props?.children) } };
-};
 const nodes = (node: unknown): Node[] => {
   if (Array.isArray(node)) return node.flatMap(nodes);
   if (!node || typeof node !== "object") return [];
@@ -79,7 +63,7 @@ describe("board tracer", () => {
   });
 
   it("serves a GSD Path workspace, fork or upstream, through the same refresh-to-tasks path", async () => {
-    for (const [files, branch, review, question] of [[[...forkFiles, ...forkReviewFiles], "feature/milestone-001", "Panel: gpt, muse", "A001 · storage account"], [[...upstreamFiles, ...upstreamReviewFiles], "gsd-path/M001", "Overall verdict: Blocked", "No discussion recorded"]] as const) {
+    for (const [files, branch, review, question] of [[[...forkFiles, ...forkReviewFiles], "feature/milestone-001", "Panel: gpt, muse", "A001 · storage account"], [[...upstreamFiles, ...upstreamReviewFiles], "gsd-path/M001", "Final review · review/FINAL.md", "No discussion recorded"]] as const) {
       const workspace = await FixtureWorkspace.create(files);
       const host = new FakeHost();
       host.registerWorkspace("selected", workspace.root);
@@ -91,7 +75,7 @@ describe("board tracer", () => {
       expect(controller.getState().snapshot?.overview).toBeUndefined();
       for (const compact of [false, true]) {
         expect(text(expand(PathOverviewView({ state: controller.getState(), usage: createUsageState(), onRefresh: () => undefined, theme, compact })))).toContain(branch);
-        expect(text(expand(PathTasksView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain("Wave 1");
+        expect(text(expand(PathTasksView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain("W1");
         expect(text(expand(PathReviewsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(review);
         expect(text(expand(PathQuestionsView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(question);
       }
@@ -123,7 +107,7 @@ describe("board tracer", () => {
     // Claude turns on 2026-09-01 predate M000's ship date (2026-09-05); Codex turns on 2026-09-10 go to the current M001.
     expect(usage.getState().usage?.milestones).toEqual([{ id: "M000", turns: 2, tokens: 432, cost: null }, { id: "M001", turns: 2, tokens: 3150, cost: 0.28 }]);
     const roadmap = text(expand(PathRoadmapView({ state: controller.getState(), usage: usage.getState(), onRefresh: () => undefined, theme })));
-    for (const expected of ["Shipped 2026-09-05", "11 of 12 tasks done", "2 turns", "$0.28 · 2 turns", "3k tokens"]) expect(roadmap).toContain(expected);
+    for (const expected of ["Shipped Sep 5", "11 of 12 tasks done", "2 turns", "$0.28 · 2 turns", "3k tokens"]) expect(roadmap).toContain(expected);
     expect(usage.getState().ledger.loaded).toBe(false);
     await usage.loadLedger();
     expect(usage.getState().ledger).toMatchObject({ loaded: true, total: 4 });

@@ -5,8 +5,8 @@
  *   record whose timestamp gives the timing.
  * - Codex rollouts: `session_meta`/`turn_context` give cwd and model, `token_usage_record` one record per model response, and
  *   `task_started` the turn's start.
- * Only numbers, model names, timestamps, the first `$gsd-path-*` skill and the first task id are kept; prompt and response text
- * is never stored.
+ * Only numbers, model names, timestamps, the first `$gsd-path-*` skill, the first task id and whether a Codex session was spawned
+ * by another are kept; prompt and response text is never stored.
  */
 
 export type HostName = "claude" | "codex";
@@ -18,6 +18,8 @@ export type HostRecord = {
 /** Everything a session file has said so far, so an appended file is read from where the last read stopped. */
 export type SessionState = {
   cwd: string | null; skill: string | null; task: string | null; model: string | null; host: HostName;
+  /** A Codex thread spawned by another (`session_meta.source.subagent`): a worker, not the session that dispatched it. */
+  spawned: boolean;
   turnStarted: Map<string, number>; lastAt: Map<string, number>; requestAt: Map<string, number>; responses: Map<string, HostRecord>;
   records: HostRecord[];
 };
@@ -30,7 +32,7 @@ const RELEVANT = /"type"\s*:\s*"(?:assistant|user|api-request|session_meta|turn_
 const TIMED = /"type"\s*:\s*"(?:assistant|api-request|session_meta|turn_context|token_usage_record)"|task_started/;
 
 export const newSessionState = (): SessionState => ({
-  cwd: null, skill: null, task: null, model: null, host: "codex",
+  cwd: null, skill: null, task: null, model: null, host: "codex", spawned: false,
   turnStarted: new Map(), lastAt: new Map(), requestAt: new Map(), responses: new Map(), records: [],
 });
 
@@ -114,7 +116,7 @@ export function consumeLine(state: SessionState, line: string): void {
     return;
   }
   if (!payload) return;
-  if (kind === "session_meta") state.cwd ??= string(payload.cwd);
+  if (kind === "session_meta") { state.cwd ??= string(payload.cwd); state.spawned ||= Boolean(record(payload.source)?.subagent); }
   else if (kind === "turn_context") { state.cwd ??= string(payload.cwd); state.model = string(payload.model) ?? state.model; }
   else if (kind === "event_msg" && payload.type === "task_started") {
     const turn = string(payload.turn_id);
@@ -136,6 +138,12 @@ export function consumeLine(state: SessionState, line: string): void {
     });
   }
 }
+
+/**
+ * The activity lane a turn belongs to: a subagent (a Claude sidechain or a spawned Codex worker) works on the first task its
+ * log names, else it is another subagent; a session nobody spawned is the orchestrator, whatever task it mentions first.
+ */
+export const laneOf = (state: SessionState, entry: HostRecord) => entry.subagent || state.spawned ? state.task ?? "subagents" : "orchestrator";
 
 /** "claude · T004 · subagent": the file's first skill (else its host), first task id, and whether a subagent wrote the turn. */
 export const agentLabel = (state: SessionState, entry: HostRecord) => `${state.skill ?? state.host}${state.task ? ` · ${state.task}` : ""}${entry.subagent ? " · subagent" : ""}`;

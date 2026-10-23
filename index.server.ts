@@ -77,7 +77,7 @@ export function createBoardService({ resolveWorkspace, readInventory = (director
     return { workspaceId, roots, shipped, current, budgetMs: USAGE_BUDGET_MS };
   };
   const noUsage = (workspaceId: string): BoardUsage => ({ workspaceId, observedAt: clock().toISOString(), availability: "unavailable", complete: true, limited: false, pricing: "missing", sessions: 0,
-    totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [] });
+    totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [], tasks: [], activity: [], activityLimited: false });
   return {
     async usage(input, paseo) {
       const query = await usageQuery(input.workspaceId, paseo);

@@ -2,8 +2,8 @@ import { constants } from "node:fs";
 import { lstat, open, opendir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
-import { BoardUsageSchema, LedgerPageSchema, LedgerRecordSchema, ModelNameSchema, type BoardUsage, type LedgerPage, type LedgerRecord, type UsageSlot } from "../shared/usage.js";
-import { agentLabel, consumeLine, costFor, newSessionState, roundHalfEven, type HostName, type HostRecord, type Price, type SessionState } from "./host-sessions.js";
+import { ACTIVITY_BUCKET_MS, ACTIVITY_LIMIT, ActivityLaneSchema, BoardUsageSchema, LedgerPageSchema, LedgerRecordSchema, ModelNameSchema, type ActivityLane, type BoardUsage, type LedgerPage, type LedgerRecord, type UsageSlot } from "../shared/usage.js";
+import { agentLabel, consumeLine, laneOf, costFor, newSessionState, roundHalfEven, type HostName, type HostRecord, type Price, type SessionState } from "./host-sessions.js";
 
 /**
  * An in-memory index of host session logs, read the way the GSD Path daemon reads them. Session files live outside the
@@ -31,7 +31,7 @@ export type UsageQuery = { workspaceId: string; roots: readonly string[]; shippe
 export type LedgerQuery = UsageQuery & { offset: number; limit: number; anchor: number | null };
 export type UsageIndex = { usage(query: UsageQuery): Promise<BoardUsage>; ledger(query: LedgerQuery): Promise<LedgerPage> };
 type Config = { prices: Map<string, Price>; pricing: BoardUsage["pricing"]; sessionDirs: readonly string[] };
-type Collected = { complete: boolean; limited: boolean; sessions: number; records: (HostRecord & { agent: string })[]; config: Config };
+type Collected = { complete: boolean; limited: boolean; sessions: number; records: (HostRecord & { agent: string; lane: string })[]; config: Config };
 
 const expandHome = (pattern: string) => pattern === "~" ? homedir() : pattern.startsWith("~/") ? join(homedir(), pattern.slice(2)) : pattern;
 const isUnder = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
@@ -226,7 +226,7 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       for (const record of entry.state.records) {
         // Subagent transcripts forked from one context repeat the same responses.
         if (record.id) { if (seen.has(record.id)) continue; seen.add(record.id); }
-        records.push({ ...record, agent: agentLabel(entry.state, record) });
+        records.push({ ...record, agent: agentLabel(entry.state, record), lane: laneOf(entry.state, record) });
       }
     }
     records.sort((left, right) => (left.at ?? "").localeCompare(right.at ?? ""));
@@ -248,6 +248,8 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     const models = new Map<string, UsageSlot & { priced: number; model: string | null; host: HostName }>();
     const milestones = new Map<string | null, UsageSlot & { priced: number }>();
     const unpriced: string[] = [];
+    const tasks = new Map<string, UsageSlot & { priced: number; durationS: number; first: number; last: number }>();
+    const activity = new Map<string, { lane: ActivityLane; at: string; turns: number; cost: number; priced: number }>();
     for (const record of records) {
       const cost = costFor(config.prices, record.model, record.tokensIn, record.tokensCached, record.tokensOut);
       const tokens = record.tokensIn + record.tokensCached + record.tokensOut;
@@ -267,8 +269,28 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       const milestoneSlot = milestones.get(milestone) ?? slot();
       milestones.set(milestone, milestoneSlot);
       add(milestoneSlot, tokens, cost);
+      // A task id the schema cannot carry (more than six digits) counts with the other subagents.
+      const lane: ActivityLane = ActivityLaneSchema.safeParse(record.lane).success ? record.lane as ActivityLane : "subagents";
+      // Times are compared as instants and written in one form; a timestamp that does not parse places the turn nowhere.
+      const time = record.at ? Date.parse(record.at) : NaN;
+      if (lane !== "orchestrator" && lane !== "subagents") {
+        const taskSlot = tasks.get(lane) ?? { ...slot(), durationS: 0, first: Infinity, last: -Infinity };
+        tasks.set(lane, taskSlot);
+        add(taskSlot, tokens, cost);
+        taskSlot.durationS += record.durationS ?? 0;
+        if (Number.isFinite(time)) { taskSlot.first = Math.min(taskSlot.first, time); taskSlot.last = Math.max(taskSlot.last, time); }
+      }
+      if (Number.isFinite(time)) {
+        const at = new Date(Math.floor(time / ACTIVITY_BUCKET_MS) * ACTIVITY_BUCKET_MS).toISOString();
+        const bucket = activity.get(`${lane}|${at}`) ?? { lane, at, turns: 0, cost: 0, priced: 0 };
+        activity.set(`${lane}|${at}`, bucket);
+        bucket.turns += 1;
+        if (cost !== null) { bucket.cost += cost; bucket.priced += 1; }
+      }
     }
     totals.prompts = prompts.size;
+    const buckets = [...activity.values()].sort((left, right) => right.at.localeCompare(left.at)).slice(0, ACTIVITY_LIMIT)
+      .sort((left, right) => left.at.localeCompare(right.at) || left.lane.localeCompare(right.lane));
     const usage: BoardUsage = {
       workspaceId: query.workspaceId, observedAt: new Date().toISOString(), availability: records.length ? "available" : "none", complete: collected.complete, limited: collected.limited,
       pricing: config.pricing, sessions: collected.sessions,
@@ -276,6 +298,10 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       models: [...models.values()].sort((left, right) => right.tokens - left.tokens).slice(0, 64).map(({ model: name, host, ...value }) => ({ model: name, host, ...finish(value) })),
       milestones: [...milestones].filter(([id]) => id === null || /^M\d{3,6}$/.test(id)).slice(0, 129).map(([id, value]) => ({ id, ...finish(value) })),
       unpriced: unpriced.slice(0, 32),
+      tasks: [...tasks].sort(([left], [right]) => left.localeCompare(right)).slice(0, 512)
+        .map(([id, { durationS, first, last, ...value }]) => ({ id, ...finish(value), durationS: roundHalfEven(durationS, 1), first: Number.isFinite(first) ? new Date(first).toISOString() : null, last: Number.isFinite(last) ? new Date(last).toISOString() : null })),
+      activity: buckets.map(({ lane, at, turns, cost, priced }) => ({ lane, at, turns, cost: priced ? roundHalfEven(cost, 4) : null })),
+      activityLimited: activity.size > ACTIVITY_LIMIT,
     };
     return BoardUsageSchema.parse(usage);
   }

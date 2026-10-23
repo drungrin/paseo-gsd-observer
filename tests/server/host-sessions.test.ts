@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentLabel, consumeLine, costFor, newSessionState, roundHalfEven } from "../../server/host-sessions";
-import { claudeTranscript, codexRollout } from "../fixtures/session-fixtures";
+import { agentLabel, consumeLine, costFor, laneOf, newSessionState, roundHalfEven } from "../../server/host-sessions";
+import { claudeTranscript, codexRollout, codexWorker } from "../fixtures/session-fixtures";
 
 const parse = (text: string) => { const state = newSessionState(); for (const line of text.split("\n")) consumeLine(state, line); return state; };
 
@@ -36,6 +36,19 @@ describe("host session parsing, as the GSD Path daemon parses it", () => {
     expect(first).toMatchObject({ tokensIn: 10, tokensCached: 500, tokensOut: 40, at: "2026-10-21T12:00:13.500Z", turn: "u1", durationS: 12.5 });
     expect(agentLabel(state, first)).toBe("$gsd-path-build · T009");
     expect(second.durationS).toBeNull();
+  });
+
+  it("puts a subagent's turns in its task's lane, and every session nobody spawned in the orchestrator's", () => {
+    const worker = parse(codexWorker("/work/proj"));
+    expect(worker).toMatchObject({ spawned: true, task: "T007" });
+    expect(worker.records.map((record) => laneOf(worker, record))).toEqual(["T007", "T007"]);
+    // The daemon labels a spawned Codex thread like any other; only the lane tells them apart.
+    expect(agentLabel(worker, worker.records[0])).toBe("codex · T007");
+    const dispatcher = parse(codexRollout("/work/proj"));
+    expect(dispatcher).toMatchObject({ spawned: false, task: "T006" });
+    expect(laneOf(dispatcher, dispatcher.records[0])).toBe("orchestrator");
+    const claude = parse(claudeTranscript("/work/proj"));
+    expect(claude.records.map((record) => laneOf(claude, record))).toEqual(["orchestrator", "subagents"]);
   });
 
   it("prices tokens per million and leaves unpriced models without a cost", () => {

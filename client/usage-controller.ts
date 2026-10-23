@@ -11,6 +11,8 @@ export type UsageController = {
   getState(): UsageViewState;
   subscribe(listener: () => void): () => void;
   load(): Promise<void>;
+  /** The files changed, so the figures may have too: reads usage now, or once `ms` after the last read began if that was sooner. */
+  loadIfOlderThan(ms: number): Promise<void>;
   loadLedger(more?: boolean): Promise<void>;
   dispose(): void;
 };
@@ -18,23 +20,27 @@ export type UsageController = {
 const emptyLedger = (): LedgerState => ({ loaded: false, loading: false, error: null, complete: true, total: 0, records: [] });
 export const createUsageState = (): UsageViewState => ({ usage: null, loading: false, error: null, ledger: emptyLedger() });
 
-export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc, retryMs = 1_500, maxRetries = 20 }: {
+export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc, retryMs = 1_500, maxRetries = 20, clock = Date.now }: {
   workspaceId: string;
   callUsageRpc: (input: { workspaceId: string }) => Promise<BoardUsage>;
   callLedgerRpc: (input: { workspaceId: string; offset: number; limit: number; anchor?: number }) => Promise<LedgerPage>;
   retryMs?: number;
   maxRetries?: number;
+  clock?: () => number;
 }): UsageController {
   let state = createUsageState();
   let disposed = false;
   let retries = 0;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let ledgerGeneration = 0;
+  let readAt = Number.NEGATIVE_INFINITY;
+  let follow: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   const set = (next: Partial<UsageViewState>) => { if (disposed) return; state = { ...state, ...next }; for (const listener of listeners) listener(); };
   const read = async () => {
     if (disposed || state.loading) return;
     if (retry) { clearTimeout(retry); retry = undefined; }
+    readAt = clock();
     set({ loading: true, error: null });
     try {
       const usage = await callUsageRpc({ workspaceId });
@@ -50,6 +56,13 @@ export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     // Every load asked for starts a fresh set of retries.
     async load() { retries = 0; await read(); },
+    async loadIfOlderThan(ms) {
+      if (disposed) return;
+      const wait = readAt + ms - clock();
+      if (wait <= 0) { await controller.load(); return; }
+      // A change inside the interval is read when it ends, so the last change of a burst is never missed.
+      follow ??= setTimeout(() => { follow = undefined; void controller.load(); }, wait);
+    },
     async loadLedger(more = false) {
       if (disposed || (more && state.ledger.loading)) return;
       const generation = ++ledgerGeneration;
@@ -64,7 +77,7 @@ export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc
         set({ ledger: { ...state.ledger, loading: false, error: "Could not load the host turn ledger." } });
       }
     },
-    dispose() { disposed = true; if (retry) clearTimeout(retry); listeners.clear(); },
+    dispose() { disposed = true; if (retry) clearTimeout(retry); if (follow) clearTimeout(follow); listeners.clear(); },
   };
   return controller;
 }

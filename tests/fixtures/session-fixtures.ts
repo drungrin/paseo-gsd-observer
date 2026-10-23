@@ -13,3 +13,7 @@ export const claudeTranscript = (cwd: string, model = "claude-sonnet-5") => [
   { type: "assistant", cwd, timestamp: "2026-09-01T09:00:05.000Z", uuid: "a1", parentUuid: "u1", isSidechain: false, message: { model, usage: { input_tokens: 10, cache_creation_input_tokens: 90, cache_read_input_tokens: 300, output_tokens: 20 } } },
   { type: "assistant", cwd, timestamp: "2026-09-01T09:00:09.000Z", uuid: "a2", parentUuid: "u1", isSidechain: true, message: { model, usage: { input_tokens: 5, cache_read_input_tokens: 0, output_tokens: 7 } } },
 ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+
+/** A Codex worker the orchestrator spawned for one task: `session_meta.source` names its parent thread. */
+export const codexWorker = (cwd: string, task = "T007") => codexRollout(cwd, "gpt-6-astra", `Implement ${task} as briefed`)
+  .replace('"originator":"codex_exec"', '"originator":"codex_exec","source":{"subagent":{"thread_spawn":{"parent_thread_id":"thread-0","depth":1,"agent_role":"worker"}}}');

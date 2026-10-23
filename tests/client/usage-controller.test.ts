@@ -4,13 +4,32 @@ import { duration, money, tokens, usageFigures } from "../../client/usage-format
 import type { BoardUsage, LedgerPage } from "../../shared/usage";
 
 const usage = (complete: boolean, turns = 1): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete, limited: false, pricing: "configured", sessions: 1,
-  totals: { turns, prompts: turns, tokensIn: 10, tokensCached: 0, tokensOut: 1, cost: 0.01, pricedTurns: turns, durationS: 3, timedTurns: turns }, models: [], milestones: [], unpriced: [] });
+  totals: { turns, prompts: turns, tokensIn: 10, tokensCached: 0, tokensOut: 1, cost: 0.01, pricedTurns: turns, durationS: 3, timedTurns: turns }, models: [], milestones: [], unpriced: [], tasks: [], activity: [], activityLimited: false });
 const page = (offset: number, count: number, total: number): LedgerPage => ({ workspaceId: "selected", availability: "available", complete: true, total, offset,
   records: Array.from({ length: count }, (_, index) => ({ at: null, agent: "claude", host: "claude", model: null, tokensIn: offset + index, tokensCached: 0, tokensOut: 0, durationS: null, cost: null })) });
 
 afterEach(() => { vi.useRealTimers(); });
 
 describe("usage controller", () => {
+  it("reads usage again after the files change, at most once an interval, and never misses the last change", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const callUsageRpc = vi.fn().mockResolvedValue(usage(true));
+    const controller = createUsageController({ workspaceId: "selected", callUsageRpc, callLedgerRpc: vi.fn() });
+    await controller.loadIfOlderThan(60_000);
+    expect(callUsageRpc).toHaveBeenCalledTimes(1);
+    vi.setSystemTime(30_000);
+    await controller.loadIfOlderThan(60_000);
+    await controller.loadIfOlderThan(60_000);
+    expect(callUsageRpc).toHaveBeenCalledTimes(1);
+    // The two changes inside the interval are read once, when it ends.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(callUsageRpc).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(callUsageRpc).toHaveBeenCalledTimes(2);
+    controller.dispose();
+  });
+
   it("asks again while the server is still reading session logs, then stops", async () => {
     vi.useFakeTimers();
     const callUsageRpc = vi.fn().mockResolvedValueOnce(usage(false, 1)).mockResolvedValueOnce(usage(false, 2)).mockResolvedValue(usage(true, 3));

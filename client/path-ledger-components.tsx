@@ -1,7 +1,8 @@
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Text } from "react-native";
 import type { LedgerRecord } from "../shared/usage.js";
 import type { BoardViewState } from "./board-components.js";
 import { borderColor, Card, DataTable, PathFrame, SetupNotice, smallStyle, textStyle, type ThemeProps } from "./path-components.js";
+import { USAGE_SOURCE, usageAlerts, UsageCard } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { DASH, integer } from "./usage-format.js";
 
@@ -22,10 +23,19 @@ function Button({ label, busy, onPress, theme }: ThemeProps & { label: string; b
   </Pressable>;
 }
 
+/** The caveats behind the usage figures and the ledger. */
+export function ledgerNotes(): string[] {
+  return [
+    USAGE_SOURCE,
+    "Input counts new and cache-written tokens; cached counts cache reads. Seconds run from the request to the response's last block. Costs use the GSD Path daemon's price table; a dash means the model has no price.",
+  ];
+}
+
 export function PathLedgerView({ state, usage, onRefresh, onLoadLedger, theme, compact = false }: ThemeProps & { state: BoardViewState; usage: UsageViewState; onRefresh(): void; onLoadLedger(more: boolean): void; compact?: boolean }) {
   const path = state.snapshot?.path;
   const { ledger } = usage;
-  return <PathFrame title="Ledger" description="Every host turn recorded inside this workspace, newest first. Loaded only when you ask for it." subject="ledger" state={state} onRefresh={onRefresh} theme={theme} compact={compact}>
+  return <PathFrame title="Ledger" description="Host usage for this workspace, and every turn it recorded, newest first, when you ask for it." subject="ledger" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={usageAlerts(usage)} notes={ledgerNotes()}>
+    {path && <UsageCard view={usage} theme={theme} />}
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : !ledger.loaded ? <Card title="Host turn ledger" source="Claude Code and Codex session logs" theme={theme}>
       <Text style={textStyle(theme, true)}>Lists each turn with its agent, model, tokens, time and cost. Reading every session log can take a moment.</Text>
       {ledger.error && <Text role="alert" style={textStyle(theme)}>{ledger.error}</Text>}
@@ -37,9 +47,6 @@ export function PathLedgerView({ state, usage, onRefresh, onLoadLedger, theme, c
       {ledger.error && <Text role="alert" style={textStyle(theme)}>{ledger.error}</Text>}
       <DataTable label="Host turn ledger" columns={LEDGER_COLUMNS} rows={ledger.records.map(ledgerRow)} theme={theme} />
       {ledger.records.length < ledger.total && <Button label={`Load ${integer(Math.min(200, ledger.total - ledger.records.length))} more`} busy={ledger.loading} onPress={() => onLoadLedger(true)} theme={theme} />}
-      <View style={{ gap: 4 }}>
-        <Text style={smallStyle(theme)}>Input counts new and cache-written tokens; cached counts cache reads. Seconds run from the request to the response's last block. Costs use the GSD Path daemon's price table; a dash means the model has no price.</Text>
-      </View>
     </>}
   </PathFrame>;
 }

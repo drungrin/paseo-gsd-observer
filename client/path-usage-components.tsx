@@ -4,16 +4,24 @@ import { borderColor, Card, DataTable, smallStyle, textStyle, type ThemeProps } 
 import type { UsageViewState } from "./usage-controller.js";
 import { integer, money, tokens, usageFigures } from "./usage-format.js";
 
-/** Notes on what the figures cover: matching, pricing, models without a price, and a read still in progress. */
-export function usageNotes(usage: BoardUsage): string[] {
+/** Where the figures come from, folded with a tab's notes. */
+export const USAGE_SOURCE = "From Claude Code and Codex session logs whose working directory is inside this workspace, read as the GSD Path daemon reads them.";
+
+/** What changes how the figures read: missing prices, a read still in progress, a session folder read only in part. Shown, not folded. */
+export function usageQualifiers(usage: BoardUsage): string[] {
   return [
-    "From Claude Code and Codex session logs whose working directory is inside this workspace, read as the GSD Path daemon reads them.",
     ...(usage.pricing === "missing" ? ["No price table was found in the GSD Path daemon's configuration, so costs are not shown."] : []),
     ...(usage.unpriced.length ? [`No price is configured for ${usage.unpriced.join(", ")}: tokens counted, cost excluded.`] : []),
     ...(usage.complete ? [] : ["Still reading host session logs; the figures will grow."]),
     ...(usage.limited ? ["A session folder holds more entries than the observer walks, so these figures cover only part of it."] : []),
   ];
 }
+
+/** The qualifiers of the figures a tab shows, with a failed refresh that left the last figures up. */
+export const usageAlerts = (view: UsageViewState) => [
+  ...(view.usage?.availability === "available" ? usageQualifiers(view.usage) : []),
+  ...(view.error && view.usage ? ["Could not refresh host usage; the last figures are still displayed."] : []),
+];
 
 /** What to say when there are no figures to show yet, or null when there are. */
 export function usageNotice(view: UsageViewState): string | null {
@@ -41,8 +49,6 @@ export function UsageCard({ view, theme }: ThemeProps & { view: UsageViewState }
           columns={[{ label: "Model", width: 280 }, { label: "Host", width: 80 }, { label: "Turns", width: 80, numeric: true }, { label: "Tokens", width: 90, numeric: true }, { label: "Cost", width: 90, numeric: true }]}
           rows={usage.models.map((model) => [model.model ?? "unknown", model.host, integer(model.turns), tokens(model.tokens), money(model.cost)])} />
       </View>}
-      {view.error && <Text role="alert" style={smallStyle(theme, false)}>Could not refresh host usage; the last figures are still displayed.</Text>}
-      <View style={{ gap: 4 }}>{usageNotes(usage).map((note) => <Text key={note} style={smallStyle(theme)}>{note}</Text>)}</View>
     </>}
   </Card>;
 }

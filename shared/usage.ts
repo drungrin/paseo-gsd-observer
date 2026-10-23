@@ -1,10 +1,10 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
-import { MilestoneIdSchema } from "./path.js";
+import { MilestoneIdSchema, TaskIdSchema } from "./path.js";
 
 /**
  * Host usage for a workspace, from Claude Code and Codex session logs whose working directory lies inside it. Only numbers,
- * model names, timestamps and agent labels cross the wire; no prompt, response, path or command does.
+ * model names, timestamps, task ids and agent labels cross the wire; no prompt, response, path or command does.
  */
 
 const WorkspaceIdSchema = z.string().min(1).max(128);
@@ -16,6 +16,11 @@ export const HostSchema = z.enum(["claude", "codex"]);
 export const ModelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/);
 /** "claude", "$gsd-path-build", optionally with a task id and a subagent mark. */
 export const AgentLabelSchema = z.string().regex(/^(?:claude|codex|\$gsd-path-[a-z][a-z-]{0,40})(?: · T\d{3,6})?(?: · subagent)?$/);
+/** A task id for its subagents, "orchestrator" for sessions nobody spawned, "subagents" for subagents whose log names no task. */
+export const ActivityLaneSchema = z.union([TaskIdSchema, z.literal("orchestrator"), z.literal("subagents")]);
+/** Activity is counted in ten-minute buckets, newest kept first when there are more than the limit. */
+export const ACTIVITY_BUCKET_MS = 600_000;
+export const ACTIVITY_LIMIT = 8_000;
 const TimestampSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?$/);
 
 export const UsageTotalsSchema = z.object({
@@ -43,6 +48,12 @@ export const BoardUsageSchema = z.object({
   /** Usage per roadmap milestone; `id` null is the current milestone when the roadmap does not list it. */
   milestones: z.array(UsageSlotSchema.extend({ id: MilestoneIdSchema.nullable() }).strict()).max(129),
   unpriced: z.array(ModelNameSchema).max(32),
+  /** Usage of each task's subagents, with the first and last turn time, by task id. */
+  tasks: z.array(UsageSlotSchema.extend({ id: TaskIdSchema, durationS: SecondsSchema, first: TimestampSchema.nullable(), last: TimestampSchema.nullable() }).strict()).max(512),
+  /** Turns and cost per lane in each ten-minute bucket that had any, oldest first. */
+  activity: z.array(z.object({ lane: ActivityLaneSchema, at: TimestampSchema, turns: CountSchema, cost: CostSchema.nullable() }).strict()).max(ACTIVITY_LIMIT),
+  /** More buckets had activity than the limit; the oldest are left out. */
+  activityLimited: z.boolean(),
 }).strict();
 
 export const LedgerRecordSchema = z.object({
@@ -71,5 +82,8 @@ export const ledgerRpc = defineRpc({
 export type BoardUsage = z.infer<typeof BoardUsageSchema>;
 export type UsageTotals = z.infer<typeof UsageTotalsSchema>;
 export type UsageSlot = z.infer<typeof UsageSlotSchema>;
+export type UsageTask = BoardUsage["tasks"][number];
+export type UsageActivity = BoardUsage["activity"][number];
+export type ActivityLane = UsageActivity["lane"];
 export type LedgerRecord = z.infer<typeof LedgerRecordSchema>;
 export type LedgerPage = z.infer<typeof LedgerPageSchema>;
