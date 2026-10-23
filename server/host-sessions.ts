@@ -39,8 +39,11 @@ const epoch = (value: unknown): number | null => {
   const time = Date.parse(value);
   return Number.isNaN(time) ? null : time / 1000;
 };
-// Python's int(): integers and floats count, truncated; booleans and anything else are zero.
-const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
+// Python's int(): integers and floats count, truncated; booleans and anything else are zero. A negative or absurd count is clamped,
+// so one malformed record can never make a total negative or unsafe.
+// Far above any real count, and low enough that sums over a lifetime of turns stay safe integers.
+const MAX_COUNT = 2 ** 40;
+const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? Math.min(MAX_COUNT, Math.max(0, Math.trunc(value))) : 0;
 /**
  * Python's round(value, digits), so sums over thousands of turns match the daemon's. Both round the stored binary value, not
  * its decimal spelling (6.35 is stored just below and becomes 6.3); only an exact tie goes to the even neighbour, where

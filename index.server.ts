@@ -14,7 +14,7 @@ const INACTIVE_TTL_MS = 60_000;
 const USAGE_BUDGET_MS = 6_000;
 type Observation = { workspaceId: string; root: string; observer: SnapshotObserver; lastUsed: number };
 export type UsageRequest = { workspaceId: string };
-export type LedgerRequest = { workspaceId: string; offset: number; limit: number };
+export type LedgerRequest = { workspaceId: string; offset: number; limit: number; anchor?: number };
 export type BoardService = {
   handle(input: BoardRequest, paseo?: unknown): Promise<BoardResponse>;
   usage(input: UsageRequest, paseo?: unknown): Promise<BoardUsage>;
@@ -67,14 +67,16 @@ export function createBoardService({ resolveWorkspace, readInventory = (director
     const directory = await resolveWorkspace(workspaceId, paseo).catch(() => null);
     if (!directory || closed) return null;
     const resolved = await resolveWorkspaceRoot(directory);
-    const roots = [...new Set([directory.replace(/[\\/]+$/, ""), ...(resolved.available ? [resolved.root] : [])])];
+    // Usage belongs to GSD Path workspaces; any other folder (a home directory) would match unrelated sessions.
+    if (!resolved.available || resolved.flavor !== "gsd-path") return null;
+    const roots = [...new Set([directory.replace(/[\\/]+$/, ""), resolved.root])];
     const path = find(workspaceId)?.observer.snapshot().path;
     const milestones = path?.roadmap.milestones ?? [];
     const shipped = milestones.flatMap((milestone) => milestone.shipped ? [[milestone.shipped, milestone.id] as const] : []);
     const current = milestones.find((milestone) => milestone.current)?.id ?? /M\d{3,}/.exec(path?.state.branch ?? "")?.[0] ?? null;
-    return { workspaceId, roots, shipped, current, deadline: now() + USAGE_BUDGET_MS };
+    return { workspaceId, roots, shipped, current, budgetMs: USAGE_BUDGET_MS };
   };
-  const noUsage = (workspaceId: string): BoardUsage => ({ workspaceId, observedAt: clock().toISOString(), availability: "unavailable", complete: true, pricing: "missing", sessions: 0,
+  const noUsage = (workspaceId: string): BoardUsage => ({ workspaceId, observedAt: clock().toISOString(), availability: "unavailable", complete: true, limited: false, pricing: "missing", sessions: 0,
     totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [] });
   return {
     async usage(input, paseo) {
@@ -84,7 +86,7 @@ export function createBoardService({ resolveWorkspace, readInventory = (director
     async ledger(input, paseo) {
       const query = await usageQuery(input.workspaceId, paseo);
       const empty: LedgerPage = { workspaceId: input.workspaceId, availability: "unavailable", complete: true, total: 0, offset: input.offset, records: [] };
-      return query ? usageIndex.ledger({ ...query, offset: input.offset, limit: input.limit }).catch(() => empty) : empty;
+      return query ? usageIndex.ledger({ ...query, offset: input.offset, limit: input.limit, anchor: input.anchor ?? null }).catch(() => empty) : empty;
     },
     async handle(input, paseo) {
       if (input.intent === "status") {

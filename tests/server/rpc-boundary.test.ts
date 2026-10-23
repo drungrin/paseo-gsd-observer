@@ -36,6 +36,18 @@ describe("board RPC boundary", () => {
     await expect(ledgerRpc.input.parseAsync({ workspaceId: "selected", offset: 0, limit: 200, sessionDir: "/home" })).rejects.toBeDefined();
   });
 
+  it("reads host usage only for a GSD Path workspace", async () => {
+    const workspace = await FixtureWorkspace.create([{ path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Core\n" }]);
+    let reads = 0;
+    const counting = { usage: async () => { reads += 1; throw new Error("not reached"); }, ledger: async () => { reads += 1; throw new Error("not reached"); } };
+    const service = createBoardService({ resolveWorkspace: async () => workspace.root, usageIndex: counting as never });
+    expect(await service.usage({ workspaceId: "selected" })).toMatchObject({ availability: "unavailable", totals: { turns: 0 } });
+    expect(await service.ledger({ workspaceId: "selected", offset: 0, limit: 10 })).toMatchObject({ availability: "unavailable", records: [] });
+    expect(reads).toBe(0);
+    await service.close();
+    await workspace.cleanup();
+  });
+
   it("returns only cache metadata for status and never resolves or reads a workspace", async () => {
     let resolutions = 0;
     const service = createBoardService({ resolveWorkspace: async () => { resolutions += 1; throw new Error("secret: never disclose"); } });

@@ -77,7 +77,7 @@ const expand = (node: unknown): unknown => {
 };
 const text = (node: unknown): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" ? text((node as Node).props?.children) : "";
 const nodes = (node: unknown): Node[] => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === "object" ? [node as Node, ...nodes((node as Node).props?.children)] : [];
-const usageData = (overrides: Partial<BoardUsage> = {}): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete: true, pricing: "configured", sessions: 43,
+const usageData = (overrides: Partial<BoardUsage> = {}): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete: true, limited: false, pricing: "configured", sessions: 43,
   totals: { turns: 1234, prompts: 1200, tokensIn: 12_300_000, tokensCached: 456_700_000, tokensOut: 2_100_000, cost: 123.45, pricedTurns: 1234, durationS: 20_000, timedTurns: 1233 },
   models: [{ model: "claude-sonnet-5-5", host: "claude", turns: 800, tokens: 300_000_000, cost: 50.25 }, { model: "example-model-1.0", host: "claude", turns: 40, tokens: 5_000_000, cost: null }],
   milestones: [{ id: "M001", turns: 1240, tokens: 1_060_000_000, cost: 124.6 }, { id: "M000", turns: 12, tokens: 2_000_000, cost: 1.5 }],

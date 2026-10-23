@@ -21,7 +21,7 @@ export const createUsageState = (): UsageViewState => ({ usage: null, loading: f
 export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc, retryMs = 1_500, maxRetries = 20 }: {
   workspaceId: string;
   callUsageRpc: (input: { workspaceId: string }) => Promise<BoardUsage>;
-  callLedgerRpc: (input: { workspaceId: string; offset: number; limit: number }) => Promise<LedgerPage>;
+  callLedgerRpc: (input: { workspaceId: string; offset: number; limit: number; anchor?: number }) => Promise<LedgerPage>;
   retryMs?: number;
   maxRetries?: number;
 }): UsageController {
@@ -32,30 +32,31 @@ export function createUsageController({ workspaceId, callUsageRpc, callLedgerRpc
   let ledgerGeneration = 0;
   const listeners = new Set<() => void>();
   const set = (next: Partial<UsageViewState>) => { if (disposed) return; state = { ...state, ...next }; for (const listener of listeners) listener(); };
+  const read = async () => {
+    if (disposed || state.loading) return;
+    if (retry) { clearTimeout(retry); retry = undefined; }
+    set({ loading: true, error: null });
+    try {
+      const usage = await callUsageRpc({ workspaceId });
+      set({ usage, loading: false });
+      // A partial read resumes on the server, so asking again shows more until every session file has been read.
+      if (!usage.complete && retries < maxRetries && !disposed) { retries += 1; retry = setTimeout(() => { retry = undefined; void read(); }, retryMs); }
+    } catch {
+      set({ loading: false, error: "Could not read host usage." });
+    }
+  };
   const controller: UsageController = {
     getState: () => state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    async load() {
-      if (disposed || state.loading) return;
-      if (retry) { clearTimeout(retry); retry = undefined; }
-      set({ loading: true, error: null });
-      try {
-        const usage = await callUsageRpc({ workspaceId });
-        set({ usage, loading: false });
-        // A partial read resumes on the server, so asking again shows more until every session file has been read.
-        if (!usage.complete && retries < maxRetries && !disposed) { retries += 1; retry = setTimeout(() => { retry = undefined; void controller.load(); }, retryMs); }
-        else if (usage.complete) retries = 0;
-      } catch {
-        set({ loading: false, error: "Could not read host usage." });
-      }
-    },
+    // Every load asked for starts a fresh set of retries.
+    async load() { retries = 0; await read(); },
     async loadLedger(more = false) {
       if (disposed || (more && state.ledger.loading)) return;
       const generation = ++ledgerGeneration;
       const records = more ? state.ledger.records : [];
       set({ ledger: { ...state.ledger, records, loading: true, error: null } });
       try {
-        const page = await callLedgerRpc({ workspaceId, offset: records.length, limit: LEDGER_PAGE });
+        const page = await callLedgerRpc({ workspaceId, offset: records.length, limit: LEDGER_PAGE, ...(more ? { anchor: state.ledger.total } : {}) });
         if (generation !== ledgerGeneration) return;
         set({ ledger: { loaded: true, loading: false, error: null, complete: page.complete, total: page.total, records: [...records, ...page.records] } });
       } catch {

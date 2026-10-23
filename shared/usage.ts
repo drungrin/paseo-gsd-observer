@@ -33,6 +33,8 @@ export const BoardUsageSchema = z.object({
   availability: z.enum(["available", "none", "unavailable"]),
   /** False while session files are still being read; the figures can only grow. */
   complete: z.boolean(),
+  /** A session root held more entries than the walk reads; asking again does not read further. */
+  limited: z.boolean(),
   /** Whether the GSD Path daemon's price table could be read. */
   pricing: z.enum(["configured", "missing"]),
   sessions: CountSchema,
@@ -62,7 +64,7 @@ export const LedgerPageSchema = z.object({
 export const usageRpc = defineRpc({ name: "gsd-observer.usage", input: z.object({ workspaceId: WorkspaceIdSchema }).strict(), output: BoardUsageSchema });
 export const ledgerRpc = defineRpc({
   name: "gsd-observer.ledger",
-  input: z.object({ workspaceId: WorkspaceIdSchema, offset: CountSchema.max(10_000_000), limit: z.number().int().min(1).max(500) }).strict(),
+  input: z.object({ workspaceId: WorkspaceIdSchema, offset: CountSchema.max(10_000_000), limit: z.number().int().min(1).max(500), anchor: CountSchema.max(10_000_000).optional() }).strict(),
   output: LedgerPageSchema,
 });
 

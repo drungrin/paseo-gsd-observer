@@ -11,6 +11,7 @@ export function usageNotes(usage: BoardUsage): string[] {
     ...(usage.pricing === "missing" ? ["No price table was found in the GSD Path daemon's configuration, so costs are not shown."] : []),
     ...(usage.unpriced.length ? [`No price is configured for ${usage.unpriced.join(", ")}: tokens counted, cost excluded.`] : []),
     ...(usage.complete ? [] : ["Still reading host session logs; the figures will grow."]),
+    ...(usage.limited ? ["A session folder holds more entries than the observer walks, so these figures cover only part of it."] : []),
   ];
 }
 

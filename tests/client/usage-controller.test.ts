@@ -3,7 +3,7 @@ import { createUsageController } from "../../client/usage-controller";
 import { duration, money, tokens, usageFigures } from "../../client/usage-format";
 import type { BoardUsage, LedgerPage } from "../../shared/usage";
 
-const usage = (complete: boolean, turns = 1): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete, pricing: "configured", sessions: 1,
+const usage = (complete: boolean, turns = 1): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete, limited: false, pricing: "configured", sessions: 1,
   totals: { turns, prompts: turns, tokensIn: 10, tokensCached: 0, tokensOut: 1, cost: 0.01, pricedTurns: turns, durationS: 3, timedTurns: turns }, models: [], milestones: [], unpriced: [] });
 const page = (offset: number, count: number, total: number): LedgerPage => ({ workspaceId: "selected", availability: "available", complete: true, total, offset,
   records: Array.from({ length: count }, (_, index) => ({ at: null, agent: "claude", host: "claude", model: null, tokensIn: offset + index, tokensCached: 0, tokensOut: 0, durationS: null, cost: null })) });
@@ -22,6 +22,19 @@ describe("usage controller", () => {
     expect(controller.getState().usage).toMatchObject({ complete: true, totals: { turns: 3 } });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(callUsageRpc).toHaveBeenCalledTimes(3);
+    controller.dispose();
+  });
+
+  it("gives every load asked for a fresh set of retries", async () => {
+    vi.useFakeTimers();
+    const callUsageRpc = vi.fn().mockResolvedValue(usage(false));
+    const controller = createUsageController({ workspaceId: "selected", callUsageRpc, callLedgerRpc: vi.fn(), retryMs: 10, maxRetries: 2 });
+    await controller.load();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(callUsageRpc).toHaveBeenCalledTimes(3);
+    await controller.load();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(callUsageRpc).toHaveBeenCalledTimes(6);
     controller.dispose();
   });
 
@@ -45,7 +58,8 @@ describe("usage controller", () => {
     await controller.loadLedger(true);
     expect(controller.getState().ledger).toMatchObject({ loaded: true, total: 450 });
     expect(controller.getState().ledger.records).toHaveLength(400);
-    expect(callLedgerRpc.mock.calls.map(([input]) => input.offset)).toEqual([0, 200]);
+    // Later pages page through the turns the first page counted, so a busy session never repeats a row.
+    expect(callLedgerRpc.mock.calls.map(([input]) => input)).toEqual([{ workspaceId: "selected", offset: 0, limit: 200 }, { workspaceId: "selected", offset: 200, limit: 200, anchor: 450 }]);
     await controller.loadLedger();
     expect(controller.getState().ledger.records).toHaveLength(200);
   });

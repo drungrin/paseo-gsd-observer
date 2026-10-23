@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { lstat, open, opendir, readFile } from "node:fs/promises";
+import { lstat, open, opendir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
 import { BoardUsageSchema, LedgerPageSchema, LedgerRecordSchema, ModelNameSchema, type BoardUsage, type LedgerPage, type LedgerRecord, type UsageSlot } from "../shared/usage.js";
@@ -7,8 +7,9 @@ import { agentLabel, consumeLine, costFor, newSessionState, roundHalfEven, type 
 
 /**
  * An in-memory index of host session logs, read the way the GSD Path daemon reads them. Session files live outside the
- * workspace, so they are opened read-only without following links or blocking, and only their usage numbers are kept. Files are
- * append-only logs: each read resumes where the last one stopped, so a long-running session costs only its new lines.
+ * workspace: the configured session roots are used as the user set them up, but nothing inside them is read through a link or
+ * read blocking, and only usage numbers are kept. Files are append-only logs: each read resumes where the last one stopped, so
+ * a long-running session costs only its new lines. Every read, walk included, stops at the request's time budget.
  */
 
 export const DEFAULT_SESSION_DIRS = ["~/.codex/sessions", "~/Library/Application Support/orca/codex-accounts/*/home/sessions", "~/AppData/Roaming/orca/codex-accounts/*/home/sessions", "~/.claude/projects"] as const;
@@ -16,6 +17,7 @@ const HEAD_BYTES = 65_536;
 const CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
 const CONFIG_BYTES = 1024 * 1024;
+// Per session root, so a large Codex history never starves the Claude projects folder.
 const MAX_ENTRIES = 100_000;
 const MAX_DEPTH = 6;
 const CWD = /"cwd"\s*:\s*"((?:[^"\\]|\\.)*)"/;
@@ -23,21 +25,24 @@ const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NO
 
 type FileEntry = { dev: number; ino: number; offset: number; skipping: boolean; state: SessionState };
 type Head = { dev: number; ino: number; size: number; cwd: string | null };
-export type UsageQuery = { workspaceId: string; roots: readonly string[]; shipped: readonly (readonly [string, string])[]; current: string | null; deadline: number };
-export type UsageIndex = { usage(query: UsageQuery): Promise<BoardUsage>; ledger(query: UsageQuery & { offset: number; limit: number }): Promise<LedgerPage> };
+/** `budgetMs` starts when the request's turn comes, not while it waits behind another workspace's. */
+export type UsageQuery = { workspaceId: string; roots: readonly string[]; shipped: readonly (readonly [string, string])[]; current: string | null; budgetMs: number };
+/** `anchor` is the total the first page reported: later pages page through those turns, so new ones never repeat a row. */
+export type LedgerQuery = UsageQuery & { offset: number; limit: number; anchor: number | null };
+export type UsageIndex = { usage(query: UsageQuery): Promise<BoardUsage>; ledger(query: LedgerQuery): Promise<LedgerPage> };
 type Config = { prices: Map<string, Price>; pricing: BoardUsage["pricing"]; sessionDirs: readonly string[] };
-type Collected = { complete: boolean; sessions: number; records: (HostRecord & { agent: string })[]; config: Config };
+type Collected = { complete: boolean; limited: boolean; sessions: number; records: (HostRecord & { agent: string })[]; config: Config };
 
 const expandHome = (pattern: string) => pattern === "~" ? homedir() : pattern.startsWith("~/") ? join(homedir(), pattern.slice(2)) : pattern;
 const isUnder = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 /** Claude Code names a project folder after its working directory with every other character replaced by "-". */
 const claudeSlug = (root: string) => root.replace(/[^A-Za-z0-9]/g, "-");
 
+/** The daemon's `_prices`: each valid rate is kept and a missing one costs nothing; a model with no valid rate has no price. */
 const price = (value: unknown): Price | null => {
-  if (!value || typeof value !== "object") return null;
-  const rate = (key: string) => { const number = (value as Record<string, unknown>)[key] ?? 0; return typeof number === "number" && Number.isFinite(number) && number >= 0 ? number : null; };
-  const [input, cached, output] = [rate("input"), rate("cached"), rate("output")];
-  return input === null || cached === null || output === null ? null : { input, cached, output };
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const rates = ["input", "cached", "output"].map((key) => { const number = (value as Record<string, unknown>)[key]; return typeof number === "number" && Number.isFinite(number) && number >= 0 ? number : null; });
+  return rates.some((rate) => rate !== null) ? { input: rates[0] ?? 0, cached: rates[1] ?? 0, output: rates[2] ?? 0 } : null;
 };
 
 /** The daemon's price table and session folders from its config file, read as data; a missing table prices nothing. */
@@ -54,10 +59,12 @@ async function readConfig(path: string): Promise<Config> {
   return { prices: table, pricing: table.size ? "configured" : "missing", sessionDirs: Array.isArray(dirs) && dirs.every((dir) => typeof dir === "string") ? dirs : DEFAULT_SESSION_DIRS };
 }
 
-/** Folders matching a pattern with `~` and `*` segments; links are never followed. */
+/**
+ * Session roots matching a pattern with `~` and `*` segments, as real folders. A root that is itself reached through a link (a
+ * dotfiles setup linking `~/.claude`) is the user's configuration and is resolved; `*` matches only real folders.
+ */
 async function expand(pattern: string): Promise<string[]> {
-  const absolute = expandHome(pattern);
-  const parts = absolute.split(/[\\/]/);
+  const parts = expandHome(pattern).split(/[\\/]/);
   let bases = [parts[0] ? `${parts[0]}${sep}` : sep];
   for (const part of parts.slice(1).filter(Boolean)) {
     const next: string[] = [];
@@ -71,34 +78,47 @@ async function expand(pattern: string): Promise<string[]> {
     bases = next;
   }
   const real: string[] = [];
-  for (const base of bases) if ((await lstat(base).catch(() => null))?.isDirectory()) real.push(base);
+  for (const base of bases) {
+    const resolved = await realpath(base).catch(() => null);
+    if (resolved && (await lstat(resolved).catch(() => null))?.isDirectory() && !real.includes(resolved)) real.push(resolved);
+  }
   return real;
 }
 
+type Walked = { files: string[]; limited: boolean; timedOut: boolean };
+
 /**
- * Session files under a folder. In Claude Code's `projects` folder only the folders named after a root, or after a path inside
- * it, are walked; the working directory each file records still decides whether it belongs to the root.
+ * Session files under a root. In Claude Code's `projects` folder only the folders named after a root, or after a path inside
+ * it, are walked; the working directory each file records still decides whether it belongs to the root. No link is followed,
+ * and a folder replaced while it was listed is left out.
  */
-async function sessionFiles(base: string, roots: readonly string[], budget: { entries: number }): Promise<string[]> {
-  const files: string[] = [];
+async function sessionFiles(base: string, roots: readonly string[], deadline: number): Promise<Walked> {
+  const walked: Walked = { files: [], limited: false, timedOut: false };
   const slugs = roots.map(claudeSlug);
   const claude = basename(base) === "projects";
+  let entries = MAX_ENTRIES;
   const walk = async (folder: string, depth: number) => {
-    if (depth > MAX_DEPTH) return;
+    if (depth > MAX_DEPTH || walked.limited || walked.timedOut) return;
+    if (Date.now() > deadline) { walked.timedOut = true; return; }
+    const before = await lstat(folder).catch(() => null);
+    if (!before?.isDirectory() || before.isSymbolicLink()) return;
+    const files: string[] = [];
+    const folders: string[] = [];
     const directory = await opendir(folder).catch(() => null);
     if (!directory) return;
     for await (const entry of directory) {
-      if (--budget.entries < 0) break;
+      if (--entries < 0) { walked.limited = true; break; }
       if (entry.isSymbolicLink()) continue;
-      const path = join(folder, entry.name);
-      if (entry.isDirectory()) {
-        if (depth === 0 && claude && !slugs.some((slug) => entry.name === slug || entry.name.startsWith(`${slug}-`))) continue;
-        await walk(path, depth + 1);
-      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
+      if (entry.isDirectory() && !(depth === 0 && claude && !slugs.some((slug) => entry.name === slug || entry.name.startsWith(`${slug}-`)))) folders.push(join(folder, entry.name));
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(join(folder, entry.name));
     }
+    const after = await lstat(folder).catch(() => null);
+    if (!after || after.isSymbolicLink() || after.dev !== before.dev || after.ino !== before.ino) return;
+    walked.files.push(...files);
+    for (const child of folders) await walk(child, depth + 1);
   };
   await walk(base, 0);
-  return files;
+  return walked;
 }
 
 export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAEMON_CONFIG ?? join(homedir(), ".gsd-path", "daemon.json") }: { sessionDirs?: readonly string[]; configPath?: string } = {}): UsageIndex {
@@ -167,27 +187,35 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     } catch { return true; } finally { await handle.close().catch(() => undefined); }
   }
 
-  async function collect(roots: readonly string[], deadline: number): Promise<Collected> {
+  async function collect(roots: readonly string[], budgetMs: number): Promise<Collected> {
+    const deadline = Date.now() + budgetMs;
     const config = await readConfig(configPath);
-    const budget = { entries: MAX_ENTRIES };
     let complete = true;
+    let limited = false;
     let sessions = 0;
     const matched: string[] = [];
+    const visited = new Set<string>();
     for (const pattern of sessionDirs ?? config.sessionDirs) {
       for (const base of await expand(pattern)) {
-        for (const path of await sessionFiles(base, roots, budget)) {
-          const parsed = entries.get(path)?.state.cwd;
-          const cwd = parsed ?? await headCwd(path);
-          const claude = basename(base) === "projects";
+        const claude = basename(base) === "projects";
+        const walked = await sessionFiles(base, roots, deadline);
+        limited ||= walked.limited;
+        if (walked.timedOut) complete = false;
+        for (const path of walked.files) {
+          // Overlapping session roots ("~/.codex" and "~/.codex/sessions") reach the same file once.
+          if (visited.has(path)) continue;
+          visited.add(path);
+          const late = Date.now() > deadline;
+          if (late) complete = false;
+          // Past the deadline only what is already known counts; nothing new is read.
+          const cwd = entries.get(path)?.state.cwd ?? (late ? heads.get(path)?.cwd ?? null : await headCwd(path));
           // A Claude transcript in a matching folder may name its cwd after the head; it is read to find out.
           if (cwd ? !roots.some((root) => isUnder(cwd, root)) : !claude) continue;
-          if (!complete) { matched.push(path); continue; }
-          if (!await advance(path, deadline)) complete = false;
           matched.push(path);
+          if (!late && !await advance(path, deadline)) complete = false;
         }
       }
     }
-    if (budget.entries < 0) complete = false;
     const seen = new Set<string>();
     const records: Collected["records"] = [];
     for (const path of matched) {
@@ -202,7 +230,7 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       }
     }
     records.sort((left, right) => (left.at ?? "").localeCompare(right.at ?? ""));
-    return { complete, sessions, records, config };
+    return { complete, limited, sessions, records, config };
   }
 
   // Claude Code labels its own zero-token messages "<synthetic>"; the brackets are not part of a model name.
@@ -242,7 +270,7 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     }
     totals.prompts = prompts.size;
     const usage: BoardUsage = {
-      workspaceId: query.workspaceId, observedAt: new Date().toISOString(), availability: records.length ? "available" : "none", complete: collected.complete,
+      workspaceId: query.workspaceId, observedAt: new Date().toISOString(), availability: records.length ? "available" : "none", complete: collected.complete, limited: collected.limited,
       pricing: config.pricing, sessions: collected.sessions,
       totals: { ...totals, cost: totals.pricedTurns ? roundHalfEven(totals.cost, 2) : null, durationS: roundHalfEven(totals.durationS, 1) },
       models: [...models.values()].sort((left, right) => right.tokens - left.tokens).slice(0, 64).map(({ model: name, host, ...value }) => ({ model: name, host, ...finish(value) })),
@@ -252,18 +280,23 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     return BoardUsageSchema.parse(usage);
   }
 
+  /** One turn for the wire; a field the schema refuses is dropped on its own, never the whole page. */
   const ledgerRecord = (record: Collected["records"][number], prices: Config["prices"]): LedgerRecord => {
     const cost = costFor(prices, record.model, record.tokensIn, record.tokensCached, record.tokensOut);
     const value: LedgerRecord = { at: record.at, agent: record.agent, host: record.host, model: model(record.model), tokensIn: record.tokensIn, tokensCached: record.tokensCached, tokensOut: record.tokensOut, durationS: record.durationS, cost: cost === null ? null : roundHalfEven(cost, 4) };
     if (LedgerRecordSchema.safeParse(value).success) return value;
-    return { ...value, at: LedgerRecordSchema.shape.at.safeParse(value.at).success ? value.at : null, agent: record.host };
+    const { shape } = LedgerRecordSchema;
+    const valid = <K extends keyof LedgerRecord>(key: K, fallback: LedgerRecord[K]) => shape[key].safeParse(value[key]).success ? value[key] : fallback;
+    return { at: valid("at", null), agent: valid("agent", record.host), host: record.host, model: valid("model", null), tokensIn: valid("tokensIn", 0), tokensCached: valid("tokensCached", 0), tokensOut: valid("tokensOut", 0), durationS: valid("durationS", null), cost: valid("cost", null) };
   };
 
   return {
-    usage: (query) => exclusive(async () => summarize(query, await collect(query.roots, query.deadline))),
+    usage: (query) => exclusive(async () => summarize(query, await collect(query.roots, query.budgetMs))),
     ledger: (query) => exclusive(async () => {
-      const collected = await collect(query.roots, query.deadline);
-      const newest = collected.records.slice().reverse();
+      const collected = await collect(query.roots, query.budgetMs);
+      // Turns are in time order and new ones append, so the first `anchor` turns are the set the first page saw.
+      const anchored = query.anchor === null ? collected.records : collected.records.slice(0, query.anchor);
+      const newest = anchored.slice().reverse();
       return LedgerPageSchema.parse({
         workspaceId: query.workspaceId, availability: newest.length ? "available" : "none", complete: collected.complete, total: newest.length, offset: query.offset,
         records: newest.slice(query.offset, query.offset + query.limit).map((record) => ledgerRecord(record, collected.config.prices)),
