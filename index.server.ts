@@ -67,17 +67,18 @@ export function createBoardService({ resolveWorkspace, readInventory = (director
     const directory = await resolveWorkspace(workspaceId, paseo).catch(() => null);
     if (!directory || closed) return null;
     const resolved = await resolveWorkspaceRoot(directory);
-    // Usage belongs to GSD Path workspaces; any other folder (a home directory) would match unrelated sessions.
-    if (!resolved.available || resolved.flavor !== "gsd-path") return null;
+    // Usage belongs to GSD workspaces; any other folder (a home directory) would match unrelated sessions.
+    if (!resolved.available || (resolved.flavor !== "gsd-path" && resolved.flavor !== "gsd-core")) return null;
     const roots = [...new Set([directory.replace(/[\\/]+$/, ""), resolved.root])];
+    if (resolved.flavor === "gsd-core") return { workspaceId, flavor: "gsd-core" as const, roots, shipped: [], current: null, budgetMs: USAGE_BUDGET_MS };
     const path = find(workspaceId)?.observer.snapshot().path;
     const milestones = path?.roadmap.milestones ?? [];
     const shipped = milestones.flatMap((milestone) => milestone.shipped ? [[milestone.shipped, milestone.id] as const] : []);
     const current = milestones.find((milestone) => milestone.current)?.id ?? /M\d{3,}/.exec(path?.state.branch ?? "")?.[0] ?? null;
-    return { workspaceId, roots, shipped, current, budgetMs: USAGE_BUDGET_MS };
+    return { workspaceId, flavor: "gsd-path" as const, roots, shipped, current, budgetMs: USAGE_BUDGET_MS };
   };
   const noUsage = (workspaceId: string): BoardUsage => ({ workspaceId, observedAt: clock().toISOString(), availability: "unavailable", complete: true, limited: false, pricing: "missing", sessions: 0,
-    totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [], tasks: [], activity: [], activityLimited: false });
+    totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [], tasks: [], plans: [], phases: [], activity: [], activityLimited: false });
   return {
     async usage(input, paseo) {
       const query = await usageQuery(input.workspaceId, paseo);

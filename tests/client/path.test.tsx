@@ -77,6 +77,7 @@ const usageData = (overrides: Partial<BoardUsage> = {}): BoardUsage => ({ worksp
   milestones: [{ id: "M001", turns: 1240, tokens: 1_060_000_000, cost: 124.6 }, { id: "M000", turns: 12, tokens: 2_000_000, cost: 1.5 }],
   unpriced: ["example-model-1.0"],
   tasks: [{ id: "T001", turns: 300, tokens: 90_000_000, cost: 40.5, durationS: 3_600, first: "2026-10-07T09:00:05.000Z", last: "2026-10-07T13:20:00.000Z" }, { id: "T002", turns: 120, tokens: 30_000_000, cost: 12.25, durationS: 1_200, first: "2026-10-07T09:10:00.000Z", last: "2026-10-07T10:00:00.000Z" }],
+  plans: [], phases: [],
   activity: [
     { lane: "orchestrator", at: "2026-10-07T08:50:00.000Z", turns: 4, cost: 0.5 },
     { lane: "T001", at: "2026-10-07T09:00:00.000Z", turns: 10, cost: 1.25 }, { lane: "T002", at: "2026-10-07T09:10:00.000Z", turns: 6, cost: 0.75 }, { lane: "T001", at: "2026-10-07T09:10:00.000Z", turns: 12, cost: 1.5 },

@@ -15,6 +15,9 @@ import type { BoardVerificationPhase } from "../../shared/verification";
 import type { BoardValidationPhase } from "../../shared/validation";
 import type { DebugSession } from "../../shared/debug";
 import type { BoardViewState } from "../../client/board-components";
+import { createUsageState, type UsageViewState } from "../../client/usage-controller";
+import { CORE_USAGE_SOURCE } from "../../client/path-usage-components";
+import type { BoardUsage } from "../../shared/usage";
 import { phaseChecks } from "../helpers/phase-checks";
 
 const theme = { colors: { surface0: "#ffffff", surface1: "#f9fafb", surface2: "#f0f2f5", foreground: "#16181d", foregroundMuted: "#56606d", accent: "#2a78d6", accentForeground: "#ffffff", border: "#d9dfe6" } };
@@ -507,6 +510,44 @@ describe("Overview withheld and unread evidence", () => {
   });
 });
 
+describe("Overview usage", () => {
+  const usage = (overrides: Partial<BoardUsage> = {}) => ({ ...createUsageState(), usage: {
+    workspaceId: "selected", observedAt: "2026-09-25T01:34:00.000Z", availability: "available", complete: true, limited: false, pricing: "configured", sessions: 3,
+    totals: { turns: 40, prompts: 20, tokensIn: 1_000, tokensCached: 9_000, tokensOut: 500, cost: 10, pricedTurns: 40, durationS: 600, timedTurns: 40 }, models: [], milestones: [], unpriced: [], tasks: [],
+    plans: [{ id: "59.3-23", turns: 5, tokens: 500, cost: 2, durationS: 60, first: null, last: null }, { id: "12-1", turns: 9, tokens: 900, cost: 5, durationS: 60, first: null, last: null }],
+    phases: [{ id: "59.3", turns: 10, tokens: 1_000, cost: 3, durationS: 120 }, { id: "12", turns: 12, tokens: 1_200, cost: 5, durationS: 90 }],
+    activity: [], activityLimited: false, ...overrides,
+  } satisfies BoardUsage });
+  const render = (value: UsageViewState = usage()) => { const tree = expand(OverviewView({ state: state(), usage: value, theme, onRefresh: vi.fn() })); return { tree, content: text(tree) }; };
+
+  it("adds the headline usage figures beside the planning ones", () => {
+    const { tree } = render();
+    const labels = nodes(tree).map((node) => node.props?.accessibilityLabel).filter((label): label is string => typeof label === "string");
+    expect(labels).toContain("Spent: $10.00, $0.25 per turn");
+    expect(labels.some((label) => label.startsWith("Turns: 40"))).toBe(true);
+  });
+
+  it("splits the money by this milestone's phases and plans only, and says what share they are", () => {
+    const { content } = render();
+    expect(content).toContain("This milestone's phases · $3.00, 30% of all spend");
+    expect(content).toContain("Phase 59.3");
+    expect(content).toContain("59.3-23");
+    // Phase 12 and its plan are outside this milestone.
+    expect(content).not.toContain("Phase 12");
+    expect(content).not.toContain("12-1");
+    expect(coreOverviewNotes()).toEqual(expect.arrayContaining([CORE_USAGE_SOURCE]));
+    expect(coreOverviewNotes().join(" ")).toContain("Orchestrator turns and other subagents are not placed in a phase");
+  });
+
+  it("shows the usage qualifiers and nothing about spend until usage is read", () => {
+    expect(render(usage({ pricing: "missing", totals: { turns: 40, prompts: 20, tokensIn: 1_000, tokensCached: 9_000, tokensOut: 500, cost: null, pricedTurns: 0, durationS: 600, timedTurns: 40 } })).content)
+      .toContain("No price table was found in the GSD Path daemon's configuration, so costs are not shown.");
+    const reading = render(createUsageState());
+    expect(reading.content).toContain("Reading host session logs…");
+    expect(reading.content).not.toContain("Where the money went");
+  });
+});
+
 describe("internal board tabs", () => {
   const renderTabs = (activeTab: "overview" | "plans" | "context" | "validation" | "verification" | "uat" | "todos" | "parking" | "debug" = "overview") => {
     const onSelect = vi.fn();
@@ -525,27 +566,14 @@ describe("internal board tabs", () => {
 
   it("orders Overview first and Debug last with accessible panel relationships", () => {
     const { tabs, onSelect } = renderTabs();
-    expect(tabs.map((tab) => tab.props?.accessibilityLabel)).toEqual(["Overview", "Plans", "Context", "Validation", "Verification", "UAT", "TODOs", "Parking Lot", "Debug"]);
+    expect(tabs.map((tab) => tab.props?.accessibilityLabel)).toEqual(["Overview", "Plans", "Timeline", "Context", "Validation", "Verification", "UAT", "TODOs", "Parking Lot", "Debug", "Ledger"]);
+    const ids = ["overview", "plans", "timeline", "context", "validation", "verification", "uat", "todos", "parking", "debug", "ledger"];
+    expect(tabs).toHaveLength(ids.length);
     expect(tabs[0].props).toMatchObject({ tabIndex: 0, accessibilityState: { selected: true }, "aria-selected": true, "aria-controls": "test-board-panel-overview" });
-    expect(tabs[1].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-plans" });
-    expect(tabs[2].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-context" });
-    expect(tabs[3].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-validation" });
-    expect(tabs[4].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-verification" });
-    expect(tabs[5].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-uat" });
-    expect(tabs[6].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-todos" });
-    expect(tabs[7].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-parking" });
-    expect(tabs[8].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": "test-board-panel-debug" });
-    expect(tabs).toHaveLength(9);
+    ids.slice(1).forEach((id, index) => expect(tabs[index + 1].props).toMatchObject({ tabIndex: -1, accessibilityState: { selected: false }, "aria-controls": `test-board-panel-${id}` }));
     (tabs[1].props?.onPress as () => void)();
     expect(onSelect).toHaveBeenCalledWith("plans");
-    expect(renderTabs("plans").tabs[1].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("context").tabs[2].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("validation").tabs[3].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("verification").tabs[4].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("uat").tabs[5].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("todos").tabs[6].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("parking").tabs[7].props?.accessibilityState).toEqual({ selected: true });
-    expect(renderTabs("debug").tabs[8].props?.accessibilityState).toEqual({ selected: true });
+    ids.forEach((id, index) => expect(renderTabs(id as never).tabs[index].props?.accessibilityState).toEqual({ selected: true }));
   });
 
   it("supports arrow, Home and End navigation with keyboard focus", () => {
@@ -555,24 +583,13 @@ describe("internal board tabs", () => {
     expect(onSelect).toHaveBeenCalledWith("plans");
     expect(plansFocus).toHaveBeenCalledOnce();
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(tabForKey("plans", "ArrowRight")).toBe("context");
-    expect(tabForKey("context", "ArrowLeft")).toBe("plans");
-    expect(tabForKey("context", "ArrowRight")).toBe("validation");
-    expect(tabForKey("validation", "ArrowLeft")).toBe("context");
-    expect(tabForKey("validation", "ArrowRight")).toBe("verification");
-    expect(tabForKey("verification", "ArrowLeft")).toBe("validation");
-    expect(tabForKey("verification", "ArrowRight")).toBe("uat");
-    expect(tabForKey("uat", "ArrowLeft")).toBe("verification");
-    expect(tabForKey("uat", "ArrowRight")).toBe("todos");
-    expect(tabForKey("todos", "ArrowLeft")).toBe("uat");
-    expect(tabForKey("todos", "ArrowRight")).toBe("parking");
-    expect(tabForKey("parking", "ArrowLeft")).toBe("todos");
-    expect(tabForKey("parking", "ArrowRight")).toBe("debug");
-    expect(tabForKey("debug", "ArrowLeft")).toBe("parking");
-    expect(tabForKey("debug", "ArrowRight")).toBe("overview");
-    expect(tabForKey("overview", "ArrowLeft")).toBe("debug");
-    expect(tabForKey("debug", "Home")).toBe("overview");
-    expect(tabForKey("overview", "End")).toBe("debug");
+    const ids = ["overview", "plans", "timeline", "context", "validation", "verification", "uat", "todos", "parking", "debug", "ledger"] as const;
+    ids.forEach((id, index) => {
+      expect(tabForKey(id, "ArrowRight")).toBe(ids[(index + 1) % ids.length]);
+      expect(tabForKey(id, "ArrowLeft")).toBe(ids[(index + ids.length - 1) % ids.length]);
+    });
+    expect(tabForKey("ledger", "Home")).toBe("overview");
+    expect(tabForKey("overview", "End")).toBe("ledger");
     expect(tabForKey("overview", "Tab")).toBeNull();
   });
 });

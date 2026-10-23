@@ -9,7 +9,11 @@ import { phaseStages, stagesLabel } from "./phase-checks.js";
 import { phaseSummary as uatSummary } from "./uat-components.js";
 import { phaseSummary as validationSummary } from "./validation-components.js";
 import { phaseSummary as verificationSummary } from "./verification-components.js";
-import { FadeIn, figures, kicker, Legend, line, Pill, RelativeTime, Section, SegmentBar, Stat, StationTrack, surface, text, tint, toneColor, Toggle, type Tone, type TrackStation } from "./ui-kit.js";
+import { CORE_USAGE_SOURCE, ModelBars, TokenMix, usageAlerts, UsageFigures } from "./path-usage-components.js";
+import { Heartbeat } from "./timeline-components.js";
+import { BarRow, FadeIn, figures, kicker, Legend, line, Pill, RelativeTime, Section, SegmentBar, Stat, StationTrack, surface, text, tint, toneColor, Toggle, type Tone, type TrackStation } from "./ui-kit.js";
+import { createUsageState, type UsageViewState } from "./usage-controller.js";
+import { money } from "./usage-format.js";
 
 export { dateLabel } from "./ui-kit.js";
 
@@ -119,7 +123,8 @@ export function coreBadges(overview: BoardOverview | undefined): Partial<Record<
   };
 }
 
-function Hero({ overview, agent, theme, compact }: ThemeProps & { overview: BoardOverview; agent: WorkspaceAgent; compact: boolean }) {
+function Hero({ overview, usage, agent, theme, compact }: ThemeProps & { overview: BoardOverview; usage: UsageViewState; agent: WorkspaceAgent; compact: boolean }) {
+  const activity = usage.usage?.availability === "available" ? usage.usage.activity : [];
   const { state, roadmap, plans } = overview;
   const current = roadmap.phases.find((phase) => phase.current);
   const position = current ? roadmap.phases.indexOf(current) + 1 : null;
@@ -138,12 +143,15 @@ function Hero({ overview, agent, theme, compact }: ThemeProps & { overview: Boar
       <Text style={{ ...kicker(theme), color: accent }}>{[state.milestone ?? "Milestone", state.milestoneName, position ? `phase ${position} of ${roadmap.phases.length}` : null].filter(Boolean).join("  ·  ")}</Text>
       <AgentChip agent={agent} theme={theme} />
     </View>
-    <View style={{ gap: 8 }}>
-      <Text role="heading" numberOfLines={2} style={{ ...text(theme, compact ? 24 : 30, "700"), letterSpacing: -0.5 }}>{state.phaseId ? `Phase ${state.phaseId}` : "Phase not recorded"}{state.phaseName ? ` · ${state.phaseName}` : ""}</Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-        <Pill theme={theme} tone={statusTone(status)} label={status} strong />
-        {state.plan && <Text numberOfLines={1} style={{ ...text(theme, 13, "400", true), flexShrink: 1 }}>Plan: {state.plan}</Text>}
+    <View style={{ flexDirection: compact ? "column" : "row", gap: 24, alignItems: compact ? "stretch" : "flex-end" }}>
+      <View style={{ gap: 8, flex: 1, minWidth: 0 }}>
+        <Text role="heading" numberOfLines={2} style={{ ...text(theme, compact ? 24 : 30, "700"), letterSpacing: -0.5 }}>{state.phaseId ? `Phase ${state.phaseId}` : "Phase not recorded"}{state.phaseName ? ` · ${state.phaseName}` : ""}</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          <Pill theme={theme} tone={statusTone(status)} label={status} strong />
+          {state.plan && <Text numberOfLines={1} style={{ ...text(theme, 13, "400", true), flexShrink: 1 }}>Plan: {state.plan}</Text>}
+        </View>
       </View>
+      {activity.length > 0 && <View style={{ width: compact ? undefined : 260 }}><Heartbeat activity={activity} theme={theme} /></View>}
     </View>
     {roadmap.availability === "available" && stations.length > 0 && <View style={{ gap: 6 }}>
       <Text style={kicker(theme)}>Milestone phases{shown < roadmap.phases.length ? ` · ${shown} of ${roadmap.phases.length}` : ""}</Text>
@@ -186,6 +194,32 @@ function Figures({ overview, theme }: ThemeProps & { overview: BoardOverview }) 
     <Stat theme={theme} label="TODOs" size={todos.countsComplete ? 26 : 20} value={todos.availability === "available" ? least(todos.counts.pending, !todos.countsComplete) : "—"} detail={todos.availability === "available" ? `pending · ${todos.counts.backlog + todos.counts.deferred} in backlog` : null} />
     <Stat theme={theme} label="Debug" size={debugPartial ? 20 : 26} value={debug.availability === "available" ? least(debug.counts.unresolved, debugPartial) : "—"} detail={debug.availability === "available" ? `not resolved · ${debugPartial ? "at least " : ""}${plural(debug.counts.active + debug.counts.archived, "session file")}` : null} tone={debug.counts.unresolved ? "warning" : undefined} />
   </View>;
+}
+
+/** Where this milestone's money went: its costliest phases and plans, the token mix and the models. */
+function Spend({ overview, usage, theme, onNavigate }: ThemeProps & { overview: BoardOverview; usage: UsageViewState; onNavigate(tab: BoardTab): void }) {
+  const value = usage.usage?.availability === "available" ? usage.usage : null;
+  if (!value) return null;
+  const phases = overview.plans.availability === "available" ? overview.plans.phases : [];
+  const titles = new Map(phases.map((phase) => [phase.id, phase.title]));
+  const plans = new Map(phases.flatMap((phase) => phase.entries).map((plan) => [plan.id, plan.title]));
+  const priced = <T extends { cost: number | null }>(items: readonly T[]) => items.filter((item) => item.cost !== null).sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
+  const milestonePhases = priced(value.phases.filter((phase) => titles.has(phase.id)));
+  const milestonePlans = priced(value.plans.filter((plan) => plans.has(plan.id))).slice(0, 5);
+  const spent = milestonePhases.reduce((sum, phase) => sum + (phase.cost ?? 0), 0);
+  const total = value.totals.cost;
+  return <Section title="Where the money went" overline="Host session logs" theme={theme} gap={16}>
+    {milestonePhases.length > 0 && <View style={{ gap: 10 }}>
+      <Text style={kicker(theme)}>This milestone's phases{total ? ` · ${money(Math.round(spent * 100) / 100)}, ${Math.round(100 * spent / total)}% of all spend` : ""}</Text>
+      {milestonePhases.slice(0, 6).map((phase) => <BarRow key={phase.id} theme={theme} label={`Phase ${phase.id}`} detail={titles.get(phase.id)} value={phase.cost ?? 0} max={milestonePhases[0].cost ?? 0} figure={money(phase.cost)} color={toneColor(theme, "accent")} onPress={() => onNavigate("timeline")} />)}
+    </View>}
+    {milestonePlans.length > 0 && <View style={{ gap: 10 }}>
+      <Text style={kicker(theme)}>Costliest plans</Text>
+      {milestonePlans.map((plan) => <BarRow key={plan.id} theme={theme} label={plan.id} detail={plans.get(plan.id)} value={plan.cost ?? 0} max={milestonePlans[0].cost ?? 0} figure={money(plan.cost)} color={tint(theme, toneColor(theme, "accent"), 0.7)} onPress={() => onNavigate("plans")} />)}
+    </View>}
+    <TokenMix totals={value.totals} theme={theme} />
+    <ModelBars usage={value} theme={theme} />
+  </Section>;
 }
 
 function Latest({ state, theme }: ThemeProps & { state: BoardOverview["state"] }) {
@@ -288,11 +322,14 @@ export function coreOverviewNotes(): string[] {
     "Phase progress is based on roadmap checkboxes, not a verification verdict. Each phase shows its declared plan progress; TBD totals are not treated as zero.",
     "Requirements show checklist status only, not independent verification of product behavior.",
     "The agent status is Paseo's live state for this workspace; it is not read from the project files.",
+    CORE_USAGE_SOURCE,
+    "A plan's spend counts the turns of the executor whose prompt names that plan; a phase's spend adds its other GSD agents, on Claude Code only, since Codex records their tasks encrypted. Orchestrator turns and other subagents are not placed in a phase, so a milestone's phases spend less than the workspace.",
   ];
 }
 
-export function OverviewView({ state, onRefresh, theme, compact = false, showTable = false, onToggleTable = () => undefined, agent = null, onNavigate = () => undefined }: {
+export function OverviewView({ state, usage = createUsageState(), onRefresh, theme, compact = false, showTable = false, onToggleTable = () => undefined, agent = null, onNavigate = () => undefined }: {
   state: BoardViewState;
+  usage?: UsageViewState;
   onRefresh(): void;
   theme: BoardTheme;
   compact?: boolean;
@@ -303,13 +340,13 @@ export function OverviewView({ state, onRefresh, theme, compact = false, showTab
 }) {
   const overview = state.snapshot?.overview;
   const column = { flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" as const : 0, minWidth: 0, gap: 16 };
-  return <BoardFrame title="Overview" description="Where this milestone stands, what needs you, and how far each phase has come." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={coreOverviewAlerts(overview)} notes={coreOverviewNotes()}>
+  return <BoardFrame title="Overview" description="Where this milestone stands, what needs you, and how far each phase has come." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={[...coreOverviewAlerts(overview), ...usageAlerts(usage)]} notes={coreOverviewNotes()}>
     {!overview ? <Section theme={theme} title="Project evidence unavailable"><Text style={text(theme, 13, "400", true)}>No readable planning state was found for this workspace.</Text></Section> : <>
-      <FadeIn><Hero overview={overview} agent={agent} theme={theme} compact={compact} /></FadeIn>
+      <FadeIn><Hero overview={overview} usage={usage} agent={agent} theme={theme} compact={compact} /></FadeIn>
       <FadeIn delay={80}><Needs needs={coreNeeds(overview, agent)} calm="No UAT issue, verification gap, validation escalation or open debug session is recorded, and no agent is waiting for input." theme={theme} onNavigate={onNavigate} /></FadeIn>
-      <FadeIn delay={140}><Figures overview={overview} theme={theme} /></FadeIn>
+      <FadeIn delay={140}><View style={{ gap: 10 }}><Figures overview={overview} theme={theme} /><UsageFigures usage={usage} theme={theme} /></View></FadeIn>
       <FadeIn delay={200}><View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "flex-start", gap: 16 }}>
-        <View style={column}><Latest state={overview.state} theme={theme} /><Requirements requirements={overview.requirements} theme={theme} /></View>
+        <View style={column}><Latest state={overview.state} theme={theme} /><Requirements requirements={overview.requirements} theme={theme} /><Spend overview={overview} usage={usage} theme={theme} onNavigate={onNavigate} /></View>
         <View style={column}><Roadmap roadmap={overview.roadmap} showTable={showTable} onToggleTable={onToggleTable} theme={theme} /></View>
       </View></FadeIn>
     </>}

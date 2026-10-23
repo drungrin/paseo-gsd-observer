@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createUsageIndex } from "../../server/usage-index";
 import { ACTIVITY_BUCKET_MS, ACTIVITY_LIMIT } from "../../shared/usage";
-import { claudeTranscript, codexRollout, codexWorker } from "../fixtures/session-fixtures";
+import { claudeTranscript, codexRollout, codexWorker, coreCodexWorker, coreOrchestrator, coreSubagent } from "../fixtures/session-fixtures";
 
 let base: string;
 let root: string;
 const slug = (path: string) => path.replace(/[^A-Za-z0-9]/g, "-");
 const write = async (path: string, content: string) => { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, content, "utf8"); };
 const response = (id: string, at: string, tokens: number, extra: Record<string, unknown> = {}) => JSON.stringify({ type: "assistant", cwd: root, timestamp: at, uuid: `u-${id}`, parentUuid: "p", message: { id, model: "claude-opus-5-5", usage: { input_tokens: tokens, output_tokens: 1 } }, ...extra });
-const query = (overrides: Record<string, unknown> = {}) => ({ workspaceId: "selected", roots: [root], shipped: [] as [string, string][], current: "M002", budgetMs: 10_000, ...overrides });
+const query = (overrides: Record<string, unknown> = {}) => ({ workspaceId: "selected", flavor: "gsd-path" as const, roots: [root], shipped: [] as [string, string][], current: "M002", budgetMs: 10_000, ...overrides });
 
 beforeEach(async () => {
   base = await realpath(await mkdtemp(join(tmpdir(), "observer-usage-")));
@@ -173,5 +173,74 @@ describe("usage index", () => {
   it("reports no sessions for a root nothing ran in", async () => {
     const usage = await index().usage(query({ roots: [join(base, "nowhere")] }));
     expect(usage).toMatchObject({ availability: "none", complete: true, sessions: 0, totals: { turns: 0 } });
+  });
+});
+
+describe("usage index for a GSD Core workspace", () => {
+  const coreQuery = () => query({ flavor: "gsd-core", shipped: [], current: null });
+  /** A session with an orchestrator and two subagents in Claude Code's layout, each beside its meta file, and a Codex executor. */
+  const writeCore = async (metaOverride?: string) => {
+    const session = join(base, "claude", "projects", slug(root), "sess-1");
+    await write(join(session + ".jsonl"), coreOrchestrator(root));
+    await write(join(session, "subagents", "agent-exec1.jsonl"), coreSubagent(root, "Execute .planning/phases/61-x/61-03-PLAN.md", "e1"));
+    await write(join(session, "subagents", "agent-exec1.meta.json"), metaOverride ?? JSON.stringify({ agentType: "gsd-executor", description: "Execute plan 3 of phase 61", toolUseId: "toolu_1", spawnDepth: 1 }));
+    await write(join(session, "subagents", "agent-plan1.jsonl"), coreSubagent(root, "Plan the next phase.", "p1"));
+    await write(join(session, "subagents", "agent-plan1.meta.json"), JSON.stringify({ agentType: "gsd-planner", description: "Plan Phase 61" }));
+    await write(join(base, "codex", "2026", "10", "15", "exec.jsonl"), coreCodexWorker(root, "gsd-executor", "61-04"));
+  };
+
+  it("spends per plan and per phase, and splits nothing by milestone", async () => {
+    await writeCore();
+    const usage = await index().usage(coreQuery());
+    expect(usage.milestones).toEqual([]);
+    expect(usage.tasks).toEqual([]);
+    expect(usage.plans.map((plan) => [plan.id, plan.turns])).toEqual([["61-3", 2], ["61-4", 1]]);
+    expect(usage.plans[1]).toMatchObject({ cost: 0.11, first: "2026-10-15T10:00:31.000Z", last: "2026-10-15T10:00:31.000Z" });
+    // The phase holds its plans' executors and its planner.
+    // Two executor turns (120 + 60 tokens), two planner turns (the same), one Codex executor turn (600 new, 400 cached, 50 out).
+    expect(usage.phases).toEqual([{ id: "61", turns: 5, tokens: 120 + 60 + 120 + 60 + 1050, cost: 0.11, durationS: 30 }]);
+    const lanes = new Set(usage.activity.map((bucket) => bucket.lane));
+    expect([...lanes].sort()).toEqual(["61", "61-3", "61-4", "orchestrator", "subagents"]);
+  });
+
+  it("labels each turn by its command or role in the ledger, with its plan or phase", async () => {
+    await writeCore();
+    const page = await index().ledger({ ...coreQuery(), offset: 0, limit: 50, anchor: null });
+    const agents = new Set(page.records.map((record) => record.agent));
+    // The shared fixtures' own sessions are labeled by the skill their prompt names, a sidechain without a role by its host.
+    expect(agents).toEqual(new Set(["/gsd-execute-phase", "gsd-executor · 61-3 · subagent", "gsd-planner · 61 · subagent", "gsd-executor · 61-4", "$gsd-path-build", "$gsd-path-plan", "claude · subagent"]));
+  });
+
+  it("reads only the role and task from a subagent's meta file, and reads none that is oversized or not a file", async () => {
+    await writeCore(JSON.stringify({ agentType: "gsd-executor", description: "Execute plan 3 of phase 61", secret: "x".repeat(20_000) }));
+    const usage = await index().usage(coreQuery());
+    // An oversized meta file is not read: the executor is a subagent of unknown role.
+    expect(usage.plans.map((plan) => plan.id)).toEqual(["61-4"]);
+    await rm(join(base, "claude", "projects", slug(root), "sess-1", "subagents", "agent-exec1.meta.json"));
+    await symlink(join(base, "daemon.json"), join(base, "claude", "projects", slug(root), "sess-1", "subagents", "agent-exec1.meta.json"));
+    // A fresh index reads the file again; a meta file reached through a link is refused.
+    expect((await index().usage(coreQuery())).plans.map((plan) => plan.id)).toEqual(["61-4"]);
+  });
+
+  it("keeps each flavor's reading of a log apart when one index serves both", async () => {
+    await writeCore();
+    await write(join(base, "codex", "2026", "09", "10", "worker.jsonl"), codexWorker(root, "T007"));
+    // Both orders: a log first read for one flavor is read again for the other, never shared or rejected.
+    for (const order of [["gsd-core", "gsd-path"], ["gsd-path", "gsd-core"]] as const) {
+      const shared = index();
+      for (const flavor of order) {
+        const usage = await shared.usage(flavor === "gsd-core" ? coreQuery() : query());
+        if (flavor === "gsd-core") expect(usage.plans.map((plan) => plan.id)).toEqual(["61-3", "61-4"]);
+        else expect(usage).toMatchObject({ tasks: [{ id: "T007" }], plans: [], phases: [] });
+      }
+    }
+  });
+
+  it("reads a GSD Path workspace's logs by GSD Path's marks only", async () => {
+    await writeCore();
+    const usage = await index().usage(query());
+    expect(usage.plans).toEqual([]);
+    expect(usage.phases).toEqual([]);
+    expect(new Set(usage.activity.map((bucket) => bucket.lane))).toEqual(new Set(["orchestrator", "subagents"]));
   });
 });

@@ -36,16 +36,27 @@ describe("board RPC boundary", () => {
     await expect(ledgerRpc.input.parseAsync({ workspaceId: "selected", offset: 0, limit: 200, sessionDir: "/home" })).rejects.toBeDefined();
   });
 
-  it("reads host usage only for a GSD Path workspace", async () => {
-    const workspace = await FixtureWorkspace.create([{ path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Core\n" }]);
-    let reads = 0;
-    const counting = { usage: async () => { reads += 1; throw new Error("not reached"); }, ledger: async () => { reads += 1; throw new Error("not reached"); } };
-    const service = createBoardService({ resolveWorkspace: async () => workspace.root, usageIndex: counting as never });
-    expect(await service.usage({ workspaceId: "selected" })).toMatchObject({ availability: "unavailable", totals: { turns: 0 } });
-    expect(await service.ledger({ workspaceId: "selected", offset: 0, limit: 10 })).toMatchObject({ availability: "unavailable", records: [] });
-    expect(reads).toBe(0);
+  it("reads host usage only for a GSD workspace, with its own flavor and roots", async () => {
+    const core = await FixtureWorkspace.create([{ path: ".planning/ROADMAP.md", content: "## Phases\n- [ ] Phase 1: Core\n" }]);
+    const plain = await FixtureWorkspace.create([{ path: "notes.md", content: "not a GSD project" }]);
+    const queries: { flavor: string; roots: readonly string[] }[] = [];
+    const empty = { workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "none", complete: true, limited: false, pricing: "missing", sessions: 0,
+      totals: { turns: 0, prompts: 0, tokensIn: 0, tokensCached: 0, tokensOut: 0, cost: null, pricedTurns: 0, durationS: 0, timedTurns: 0 }, models: [], milestones: [], unpriced: [], tasks: [], plans: [], phases: [], activity: [], activityLimited: false };
+    const counting = { usage: async (query: { flavor: string; roots: readonly string[] }) => { queries.push(query); return empty; }, ledger: async () => { throw new Error("not reached"); } };
+    // A GSD Core workspace is read as GSD Core, inside its own folder only, and splits nothing by milestone.
+    const service = createBoardService({ resolveWorkspace: async () => core.root, usageIndex: counting as never });
+    expect(await service.usage({ workspaceId: "selected" })).toMatchObject({ availability: "none" });
+    expect(queries).toEqual([expect.objectContaining({ flavor: "gsd-core", shipped: [], current: null })]);
+    expect(queries[0].roots.every((root) => root.startsWith(core.root))).toBe(true);
     await service.close();
-    await workspace.cleanup();
+    // A folder that is neither pipeline (a home directory, say) would match unrelated sessions, so it is never read.
+    const other = createBoardService({ resolveWorkspace: async () => plain.root, usageIndex: counting as never });
+    expect(await other.usage({ workspaceId: "selected" })).toMatchObject({ availability: "unavailable", totals: { turns: 0 } });
+    expect(await other.ledger({ workspaceId: "selected", offset: 0, limit: 10 })).toMatchObject({ availability: "unavailable", records: [] });
+    expect(queries).toHaveLength(1);
+    await other.close();
+    await core.cleanup();
+    await plain.cleanup();
   });
 
   it("returns only cache metadata for status and never resolves or reads a workspace", async () => {

@@ -17,6 +17,7 @@ import { PathQuestionsView } from "./path-questions-components.js";
 import { PathReviewsView } from "./path-reviews-components.js";
 import { PathTasksView } from "./path-tasks-components.js";
 import { PathTimelineView } from "./path-timeline-components.js";
+import { CoreTimelineView } from "./core-timeline-components.js";
 import { boardRpc, type BoardRequest, type BoardResponse } from "../shared/board-rpc.js";
 import { ledgerRpc, usageRpc } from "../shared/usage.js";
 import { createUsageController } from "./usage-controller.js";
@@ -114,8 +115,9 @@ export function BoardPanel({ workspaceId, theme, layout, initialTab = "overview"
   const selectedTab = tabSelection.workspaceId === workspaceId ? tabSelection.tab : "overview";
   const activeTab = tabs.some((tab) => tab.id === selectedTab) ? selectedTab : "overview";
   const compact = layout.compact || panelWidth !== null && panelWidth < 760;
-  // Usage is read only for GSD Path workspaces, apart from the snapshot; the ledger only when its tab asks for it.
-  const onRefresh = () => { void controller.dispatch("refresh"); if (flavor === "gsd-path") void usageController.load(); };
+  // Usage is read for GSD workspaces, apart from the snapshot; the ledger only when its tab asks for it.
+  const gsd = flavor === "gsd-path" || flavor === "gsd-core";
+  const onRefresh = () => { void controller.dispatch("refresh"); if (gsd) void usageController.load(); };
   const onRefreshLedger = () => { onRefresh(); if (usage.ledger.loaded) void usageController.loadLedger(false); };
   const navigate = (tab: BoardTab) => {
     setTabSelection({ workspaceId, tab });
@@ -124,13 +126,13 @@ export function BoardPanel({ workspaceId, theme, layout, initialTab = "overview"
   const built = new Set([...(opened.workspaceId === workspaceId ? opened.tabs : []), activeTab]);
   useEffect(() => { controller.start(); void controller.dispatch("snapshot"); return () => controller.dispose(); }, [controller]);
   useEffect(() => () => usageController.dispose(), [usageController]);
-  useEffect(() => { if (flavor === "gsd-path") void usageController.load(); }, [flavor, usageController]);
-  useEffect(() => { if (flavor === "gsd-path" && state.changes) void usageController.loadIfOlderThan(USAGE_FOLLOW_MS); }, [flavor, state.changes, usageController]);
+  useEffect(() => { if (gsd) void usageController.load(); }, [gsd, usageController]);
+  useEffect(() => { if (gsd && state.changes) void usageController.loadIfOlderThan(USAGE_FOLLOW_MS); }, [gsd, state.changes, usageController]);
   useEffect(() => { setShowTable(false); }, [workspaceId]);
   const view = { state, theme: theme as BoardTheme, compact, onRefresh };
   const panels: Record<BoardTab, () => ReactNode> = {
-    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} usage={usage} agent={agent} onNavigate={navigate} /> : <OverviewView {...view} agent={agent} onNavigate={navigate} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
-    plans: () => <PlansView {...view} />,
+    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} usage={usage} agent={agent} onNavigate={navigate} /> : <OverviewView {...view} usage={usage} agent={agent} onNavigate={navigate} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
+    plans: () => <PlansView {...view} usage={usage} />,
     context: () => <ContextView {...view} />,
     validation: () => <ValidationView {...view} />,
     verification: () => <VerificationView {...view} />,
@@ -140,7 +142,7 @@ export function BoardPanel({ workspaceId, theme, layout, initialTab = "overview"
     debug: () => <DebugView {...view} />,
     roadmap: () => <PathRoadmapView {...view} usage={usage} />,
     tasks: () => <PathTasksView {...view} usage={usage} />,
-    timeline: () => <PathTimelineView {...view} usage={usage} />,
+    timeline: () => flavor === "gsd-core" ? <CoreTimelineView {...view} usage={usage} /> : <PathTimelineView {...view} usage={usage} />,
     reviews: () => <PathReviewsView {...view} />,
     questions: () => <PathQuestionsView {...view} />,
     ledger: () => <PathLedgerView {...view} usage={usage} onRefresh={onRefreshLedger} onLoadLedger={(more) => { void usageController.loadLedger(more); }} />,

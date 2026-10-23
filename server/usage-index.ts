@@ -2,8 +2,9 @@ import { constants } from "node:fs";
 import { lstat, open, opendir, readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, sep } from "node:path";
-import { ACTIVITY_BUCKET_MS, ACTIVITY_LIMIT, ActivityLaneSchema, BoardUsageSchema, LedgerPageSchema, LedgerRecordSchema, ModelNameSchema, type ActivityLane, type BoardUsage, type LedgerPage, type LedgerRecord, type UsageSlot } from "../shared/usage.js";
-import { agentLabel, consumeLine, laneOf, costFor, newSessionState, roundHalfEven, type HostName, type HostRecord, type Price, type SessionState } from "./host-sessions.js";
+import { TaskIdSchema } from "../shared/path.js";
+import { ACTIVITY_BUCKET_MS, ACTIVITY_LIMIT, ActivityLaneSchema, PlanLaneSchema, BoardUsageSchema, LedgerPageSchema, LedgerRecordSchema, ModelNameSchema, type ActivityLane, type BoardUsage, type LedgerPage, type LedgerRecord, type UsageSlot } from "../shared/usage.js";
+import { agentLabel, consumeLine, laneOf, costFor, newSessionState, roundHalfEven, type HostName, type HostRecord, type Price, type SessionFlavor, type SessionState, type SubagentMeta } from "./host-sessions.js";
 
 /**
  * An in-memory index of host session logs, read the way the GSD Path daemon reads them. Session files live outside the
@@ -17,6 +18,9 @@ const HEAD_BYTES = 65_536;
 const CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_LINE_BYTES = 32 * 1024 * 1024;
 const CONFIG_BYTES = 1024 * 1024;
+const META_BYTES = 16 * 1024;
+/** Claude Code writes a subagent's transcript as `<session>/subagents/agent-<id>.jsonl`, beside its `agent-<id>.meta.json`. */
+const SUBAGENT_FILE = /[\\/]subagents[\\/]agent-[A-Za-z0-9_-]{1,64}\.jsonl$/;
 // Per session root, so a large Codex history never starves the Claude projects folder.
 const MAX_ENTRIES = 100_000;
 const MAX_DEPTH = 6;
@@ -26,7 +30,7 @@ const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NO
 type FileEntry = { dev: number; ino: number; offset: number; skipping: boolean; state: SessionState };
 type Head = { dev: number; ino: number; size: number; cwd: string | null };
 /** `budgetMs` starts when the request's turn comes, not while it waits behind another workspace's. */
-export type UsageQuery = { workspaceId: string; roots: readonly string[]; shipped: readonly (readonly [string, string])[]; current: string | null; budgetMs: number };
+export type UsageQuery = { workspaceId: string; flavor: SessionFlavor; roots: readonly string[]; shipped: readonly (readonly [string, string])[]; current: string | null; budgetMs: number };
 /** `anchor` is the total the first page reported: later pages page through those turns, so new ones never repeat a row. */
 export type LedgerQuery = UsageQuery & { offset: number; limit: number; anchor: number | null };
 export type UsageIndex = { usage(query: UsageQuery): Promise<BoardUsage>; ledger(query: LedgerQuery): Promise<LedgerPage> };
@@ -122,7 +126,9 @@ async function sessionFiles(base: string, roots: readonly string[], deadline: nu
 }
 
 export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAEMON_CONFIG ?? join(homedir(), ".gsd-path", "daemon.json") }: { sessionDirs?: readonly string[]; configPath?: string } = {}): UsageIndex {
+  // A log is read once per flavor: a GSD Path and a GSD Core workspace reading the same file each keep their own marks.
   const entries = new Map<string, FileEntry>();
+  const key = (path: string, flavor: SessionFlavor) => `${flavor}\0${path}`;
   const heads = new Map<string, Head>();
   let queue: Promise<unknown> = Promise.resolve();
   // One scan at a time: entries are shared by every workspace the server observes.
@@ -147,16 +153,35 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     } catch { return null; } finally { await handle.close().catch(() => undefined); }
   }
 
+  /** The role and task Claude Code recorded for a subagent transcript; only those two strings are kept. */
+  async function subagentMeta(path: string): Promise<SubagentMeta | null> {
+    if (!SUBAGENT_FILE.test(path)) return null;
+    const handle = await open(path.replace(/\.jsonl$/, ".meta.json"), flags).catch(() => null);
+    if (!handle) return null;
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > META_BYTES) return null;
+      const buffer = Buffer.alloc(stat.size);
+      const { bytesRead } = await handle.read(buffer, 0, stat.size, 0);
+      const value = JSON.parse(buffer.toString("utf8", 0, bytesRead)) as Record<string, unknown>;
+      const field = (key: string) => typeof value[key] === "string" ? (value[key] as string).slice(0, 200) : null;
+      return { role: field("agentType"), description: field("description") };
+    } catch { return null; } finally { await handle.close().catch(() => undefined); }
+  }
+
   /** Reads the lines appended since the last read; false when the deadline stopped it first. */
-  async function advance(path: string, deadline: number): Promise<boolean> {
+  async function advance(path: string, deadline: number, flavor: SessionFlavor): Promise<boolean> {
     const handle = await open(path, flags).catch(() => null);
     if (!handle) return true;
     try {
       const stat = await handle.stat();
       if (!stat.isFile()) return true;
-      let entry = entries.get(path);
+      let entry = entries.get(key(path, flavor));
       // A replaced or truncated file is a new log.
-      if (!entry || entry.dev !== stat.dev || entry.ino !== stat.ino || stat.size < entry.offset) entries.set(path, entry = { dev: stat.dev, ino: stat.ino, offset: 0, skipping: false, state: newSessionState() });
+      if (!entry || entry.dev !== stat.dev || entry.ino !== stat.ino || stat.size < entry.offset) {
+        const meta = flavor === "gsd-core" ? await subagentMeta(path) : null;
+        entries.set(key(path, flavor), entry = { dev: stat.dev, ino: stat.ino, offset: 0, skipping: false, state: newSessionState(flavor, meta) });
+      }
       let carry = Buffer.alloc(0);
       while (entry.offset + carry.length < stat.size) {
         if (Date.now() > deadline) return false;
@@ -187,7 +212,7 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     } catch { return true; } finally { await handle.close().catch(() => undefined); }
   }
 
-  async function collect(roots: readonly string[], budgetMs: number): Promise<Collected> {
+  async function collect(roots: readonly string[], budgetMs: number, flavor: SessionFlavor): Promise<Collected> {
     const deadline = Date.now() + budgetMs;
     const config = await readConfig(configPath);
     let complete = true;
@@ -208,18 +233,18 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
           const late = Date.now() > deadline;
           if (late) complete = false;
           // Past the deadline only what is already known counts; nothing new is read.
-          const cwd = entries.get(path)?.state.cwd ?? (late ? heads.get(path)?.cwd ?? null : await headCwd(path));
+          const cwd = entries.get(key(path, flavor))?.state.cwd ?? (late ? heads.get(path)?.cwd ?? null : await headCwd(path));
           // A Claude transcript in a matching folder may name its cwd after the head; it is read to find out.
           if (cwd ? !roots.some((root) => isUnder(cwd, root)) : !claude) continue;
           matched.push(path);
-          if (!late && !await advance(path, deadline)) complete = false;
+          if (!late && !await advance(path, deadline, flavor)) complete = false;
         }
       }
     }
     const seen = new Set<string>();
     const records: Collected["records"] = [];
     for (const path of matched) {
-      const entry = entries.get(path);
+      const entry = entries.get(key(path, flavor));
       const cwd = entry?.state.cwd ?? heads.get(path)?.cwd;
       if (!entry || !cwd || !roots.some((root) => isUnder(cwd, root))) continue;
       sessions += 1;
@@ -239,6 +264,11 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
   const add = (target: UsageSlot & { priced: number }, tokens: number, cost: number | null) => { target.turns += 1; target.tokens += tokens; if (cost !== null) { target.cost = (target.cost ?? 0) + cost; target.priced += 1; } };
   const finish = ({ priced, ...value }: UsageSlot & { priced: number }): UsageSlot => ({ ...value, cost: priced ? roundHalfEven(value.cost ?? 0, 2) : null });
 
+  type Span = UsageSlot & { priced: number; durationS: number; first: number; last: number };
+  /** Each task's or plan's usage, with its first and last turn time, in id order; plan numbers compare as numbers ("61-10" after "61-9"). */
+  const spans = (map: ReadonlyMap<string, Span>, numeric = false) => [...map].sort(([left], [right]) => numeric ? left.localeCompare(right, "en", { numeric: true }) : left.localeCompare(right)).slice(0, 512)
+    .map(([id, { durationS, first, last, ...value }]) => ({ id, ...finish(value), durationS: roundHalfEven(durationS, 1), first: Number.isFinite(first) ? new Date(first).toISOString() : null, last: Number.isFinite(last) ? new Date(last).toISOString() : null }));
+
   /** The daemon's `spend_for`: a record dated on or before a milestone's ship date belongs to the earliest such milestone, later ones to the current milestone. */
   function summarize(query: UsageQuery, collected: Collected): BoardUsage {
     const { records, config } = collected;
@@ -249,6 +279,9 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
     const milestones = new Map<string | null, UsageSlot & { priced: number }>();
     const unpriced: string[] = [];
     const tasks = new Map<string, UsageSlot & { priced: number; durationS: number; first: number; last: number }>();
+    const plans = new Map<string, UsageSlot & { priced: number; durationS: number; first: number; last: number }>();
+    const phases = new Map<string, UsageSlot & { priced: number; durationS: number }>();
+    const core = query.flavor === "gsd-core";
     const activity = new Map<string, { lane: ActivityLane; at: string; turns: number; cost: number; priced: number }>();
     for (const record of records) {
       const cost = costFor(config.prices, record.model, record.tokensIn, record.tokensCached, record.tokensOut);
@@ -265,20 +298,36 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       models.set(key, modelSlot);
       add(modelSlot, tokens, cost);
       const day = (record.at ?? "").slice(0, 10);
-      const milestone = (day ? shipped.find(([date]) => day <= date)?.[1] : undefined) ?? query.current;
-      const milestoneSlot = milestones.get(milestone) ?? slot();
-      milestones.set(milestone, milestoneSlot);
-      add(milestoneSlot, tokens, cost);
+      // GSD Core records no ship dates, so its usage is split by plan and phase instead of by milestone.
+      if (!core) {
+        const milestone = (day ? shipped.find(([date]) => day <= date)?.[1] : undefined) ?? query.current;
+        const milestoneSlot = milestones.get(milestone) ?? slot();
+        milestones.set(milestone, milestoneSlot);
+        add(milestoneSlot, tokens, cost);
+      }
       // A task id the schema cannot carry (more than six digits) counts with the other subagents.
-      const lane: ActivityLane = ActivityLaneSchema.safeParse(record.lane).success ? record.lane as ActivityLane : "subagents";
+      const lane: ActivityLane = ActivityLaneSchema.safeParse(record.lane).success && (record.lane === "orchestrator" || record.lane === "subagents" || (core ? !TaskIdSchema.safeParse(record.lane).success : TaskIdSchema.safeParse(record.lane).success))
+        ? record.lane as ActivityLane : "subagents";
       // Times are compared as instants and written in one form; a timestamp that does not parse places the turn nowhere.
       const time = record.at ? Date.parse(record.at) : NaN;
       if (lane !== "orchestrator" && lane !== "subagents") {
-        const taskSlot = tasks.get(lane) ?? { ...slot(), durationS: 0, first: Infinity, last: -Infinity };
-        tasks.set(lane, taskSlot);
-        add(taskSlot, tokens, cost);
-        taskSlot.durationS += record.durationS ?? 0;
-        if (Number.isFinite(time)) { taskSlot.first = Math.min(taskSlot.first, time); taskSlot.last = Math.max(taskSlot.last, time); }
+        // A GSD Core lane is a plan ("61-3") or a phase ("61"); a plan's turns also count toward its phase.
+        const plan = core && PlanLaneSchema.safeParse(lane).success;
+        const spans = core ? plan ? plans : null : tasks;
+        if (spans) {
+          const spanSlot = spans.get(lane) ?? { ...slot(), durationS: 0, first: Infinity, last: -Infinity };
+          spans.set(lane, spanSlot);
+          add(spanSlot, tokens, cost);
+          spanSlot.durationS += record.durationS ?? 0;
+          if (Number.isFinite(time)) { spanSlot.first = Math.min(spanSlot.first, time); spanSlot.last = Math.max(spanSlot.last, time); }
+        }
+        if (core) {
+          const phase = plan ? lane.slice(0, lane.lastIndexOf("-")) : lane;
+          const phaseSlot = phases.get(phase) ?? { ...slot(), durationS: 0 };
+          phases.set(phase, phaseSlot);
+          add(phaseSlot, tokens, cost);
+          phaseSlot.durationS += record.durationS ?? 0;
+        }
       }
       if (Number.isFinite(time)) {
         const at = new Date(Math.floor(time / ACTIVITY_BUCKET_MS) * ACTIVITY_BUCKET_MS).toISOString();
@@ -298,8 +347,10 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
       models: [...models.values()].sort((left, right) => right.tokens - left.tokens).slice(0, 64).map(({ model: name, host, ...value }) => ({ model: name, host, ...finish(value) })),
       milestones: [...milestones].filter(([id]) => id === null || /^M\d{3,6}$/.test(id)).slice(0, 129).map(([id, value]) => ({ id, ...finish(value) })),
       unpriced: unpriced.slice(0, 32),
-      tasks: [...tasks].sort(([left], [right]) => left.localeCompare(right)).slice(0, 512)
-        .map(([id, { durationS, first, last, ...value }]) => ({ id, ...finish(value), durationS: roundHalfEven(durationS, 1), first: Number.isFinite(first) ? new Date(first).toISOString() : null, last: Number.isFinite(last) ? new Date(last).toISOString() : null })),
+      tasks: spans(tasks),
+      plans: spans(plans, true),
+      phases: [...phases].sort(([left], [right]) => left.localeCompare(right, "en", { numeric: true })).slice(0, 256)
+        .map(([id, { durationS, ...value }]) => ({ id, ...finish(value), durationS: roundHalfEven(durationS, 1) })),
       activity: buckets.map(({ lane, at, turns, cost, priced }) => ({ lane, at, turns, cost: priced ? roundHalfEven(cost, 4) : null })),
       activityLimited: activity.size > ACTIVITY_LIMIT,
     };
@@ -317,9 +368,9 @@ export function createUsageIndex({ sessionDirs, configPath = process.env.GSD_DAE
   };
 
   return {
-    usage: (query) => exclusive(async () => summarize(query, await collect(query.roots, query.budgetMs))),
+    usage: (query) => exclusive(async () => summarize(query, await collect(query.roots, query.budgetMs, query.flavor))),
     ledger: (query) => exclusive(async () => {
-      const collected = await collect(query.roots, query.budgetMs);
+      const collected = await collect(query.roots, query.budgetMs, query.flavor);
       // Turns are in time order and new ones append, so the first `anchor` turns are the set the first page saw.
       const anchored = query.anchor === null ? collected.records : collected.records.slice(0, query.anchor);
       const newest = anchored.slice().reverse();

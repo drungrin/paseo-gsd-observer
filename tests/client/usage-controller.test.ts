@@ -4,7 +4,7 @@ import { duration, money, tokens, usageFigures } from "../../client/usage-format
 import type { BoardUsage, LedgerPage } from "../../shared/usage";
 
 const usage = (complete: boolean, turns = 1): BoardUsage => ({ workspaceId: "selected", observedAt: "2026-10-23T00:00:00.000Z", availability: "available", complete, limited: false, pricing: "configured", sessions: 1,
-  totals: { turns, prompts: turns, tokensIn: 10, tokensCached: 0, tokensOut: 1, cost: 0.01, pricedTurns: turns, durationS: 3, timedTurns: turns }, models: [], milestones: [], unpriced: [], tasks: [], activity: [], activityLimited: false });
+  totals: { turns, prompts: turns, tokensIn: 10, tokensCached: 0, tokensOut: 1, cost: 0.01, pricedTurns: turns, durationS: 3, timedTurns: turns }, models: [], milestones: [], unpriced: [], tasks: [], plans: [], phases: [], activity: [], activityLimited: false });
 const page = (offset: number, count: number, total: number): LedgerPage => ({ workspaceId: "selected", availability: "available", complete: true, total, offset,
   records: Array.from({ length: count }, (_, index) => ({ at: null, agent: "claude", host: "claude", model: null, tokensIn: offset + index, tokensCached: 0, tokensOut: 0, durationS: null, cost: null })) });
 

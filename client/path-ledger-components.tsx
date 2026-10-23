@@ -3,7 +3,7 @@ import type { LedgerRecord } from "../shared/usage.js";
 import type { BoardViewState } from "./board-components.js";
 import { borderColor, Card, DataTable, BoardFrame, smallStyle, textStyle, type ThemeProps } from "./board-frame.js";
 import { SetupNotice } from "./path-components.js";
-import { USAGE_SOURCE, usageAlerts, UsageCard } from "./path-usage-components.js";
+import { CORE_USAGE_SOURCE, USAGE_SOURCE, usageAlerts, UsageCard } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { DASH, integer } from "./usage-format.js";
 
@@ -25,19 +25,21 @@ function Button({ label, busy, onPress, theme }: ThemeProps & { label: string; b
 }
 
 /** The caveats behind the usage figures and the ledger. */
-export function ledgerNotes(): string[] {
+export function ledgerNotes(flavor: "gsd-path" | "gsd-core" = "gsd-path"): string[] {
   return [
-    USAGE_SOURCE,
+    flavor === "gsd-core" ? CORE_USAGE_SOURCE : USAGE_SOURCE,
     "Input counts new and cache-written tokens; cached counts cache reads. Seconds run from the request to the response's last block. Costs use the GSD Path daemon's price table; a dash means the model has no price.",
   ];
 }
 
+/** The ledger of either pipeline: the usage card, then every host turn on request. */
 export function PathLedgerView({ state, usage, onRefresh, onLoadLedger, theme, compact = false }: ThemeProps & { state: BoardViewState; usage: UsageViewState; onRefresh(): void; onLoadLedger(more: boolean): void; compact?: boolean }) {
-  const path = state.snapshot?.path;
+  const core = state.snapshot?.flavor === "gsd-core";
+  const ready = core ? !!state.snapshot?.overview : !!state.snapshot?.path;
   const { ledger } = usage;
-  return <BoardFrame title="Ledger" description="Host usage for this workspace, and every turn it recorded, newest first, when you ask for it." subject="ledger" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={usageAlerts(usage)} notes={ledgerNotes()}>
-    {path && <UsageCard view={usage} theme={theme} />}
-    {!path ? <SetupNotice setup="unavailable" theme={theme} /> : !ledger.loaded ? <Card title="Host turn ledger" source="Claude Code and Codex session logs" theme={theme}>
+  return <BoardFrame title="Ledger" description="Host usage for this workspace, and every turn it recorded, newest first, when you ask for it." subject="ledger" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={usageAlerts(usage)} notes={ledgerNotes(core ? "gsd-core" : "gsd-path")}>
+    {ready && <UsageCard view={usage} theme={theme} />}
+    {!ready ? core ? <Card title="Project evidence unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable planning state was found for this workspace.</Text></Card> : <SetupNotice setup="unavailable" theme={theme} /> : !ledger.loaded ? <Card title="Host turn ledger" source="Claude Code and Codex session logs" theme={theme}>
       <Text style={textStyle(theme, true)}>Lists each turn with its agent, model, tokens, time and cost. Reading every session log can take a moment.</Text>
       {ledger.error && <Text role="alert" style={textStyle(theme)}>{ledger.error}</Text>}
       <Button label="Load host turn ledger" busy={ledger.loading} onPress={() => onLoadLedger(false)} theme={theme} />
@@ -51,3 +53,5 @@ export function PathLedgerView({ state, usage, onRefresh, onLoadLedger, theme, c
     </>}
   </BoardFrame>;
 }
+
+export const LedgerView = PathLedgerView;

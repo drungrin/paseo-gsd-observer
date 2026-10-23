@@ -1,6 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { MilestoneIdSchema, TaskIdSchema } from "./path.js";
+import { PhaseIdSchema } from "./safe-text.js";
 
 /**
  * Host usage for a workspace, from Claude Code and Codex session logs whose working directory lies inside it. Only numbers,
@@ -14,10 +15,18 @@ const SecondsSchema = z.number().nonnegative().finite();
 export const HostSchema = z.enum(["claude", "codex"]);
 /** A model name as the host recorded it ("claude-sonnet-5-5", "example-model-1.0"); anything else reads "unknown". */
 export const ModelNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$/);
-/** "claude", "$gsd-path-build", optionally with a task id and a subagent mark. */
-export const AgentLabelSchema = z.string().regex(/^(?:claude|codex|\$gsd-path-[a-z][a-z-]{0,40})(?: · T\d{3,6})?(?: · subagent)?$/);
-/** A task id for its subagents, "orchestrator" for sessions nobody spawned, "subagents" for subagents whose log names no task. */
-export const ActivityLaneSchema = z.union([TaskIdSchema, z.literal("orchestrator"), z.literal("subagents")]);
+/** A GSD Core plan as the overview writes its id: "61-3", "59.3-17". */
+export const PlanLaneSchema = z.string().max(129).regex(/^(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*-(?:0|[1-9]\d*)$/);
+/**
+ * "claude", "$gsd-path-build", optionally with a task id and a subagent mark. GSD Core: the orchestrator's command or skill
+ * ("/gsd-execute-phase", "$gsd-verify-work") or a subagent's role ("gsd-executor"), optionally with its plan or phase.
+ */
+export const AgentLabelSchema = z.string().regex(/^(?:claude|codex|\$gsd-path-[a-z][a-z-]{0,40}|[/$]gsd-[a-z][a-z-]{0,40}|[a-z][a-z0-9-]{0,40})(?: · (?:T\d{3,6}|\d{1,6}(?:\.\d{1,6}){0,7}(?:-\d{1,4})?))?(?: · subagent)?$/);
+/**
+ * A task id for its subagents, "orchestrator" for sessions nobody spawned, "subagents" for subagents whose log names no task.
+ * GSD Core: a plan for its executors, a phase for the other GSD agents working on it.
+ */
+export const ActivityLaneSchema = z.union([TaskIdSchema, PlanLaneSchema, PhaseIdSchema, z.literal("orchestrator"), z.literal("subagents")]);
 /** Activity is counted in ten-minute buckets, newest kept first when there are more than the limit. */
 export const ACTIVITY_BUCKET_MS = 600_000;
 export const ACTIVITY_LIMIT = 8_000;
@@ -50,6 +59,10 @@ export const BoardUsageSchema = z.object({
   unpriced: z.array(ModelNameSchema).max(32),
   /** Usage of each task's subagents, with the first and last turn time, by task id. */
   tasks: z.array(UsageSlotSchema.extend({ id: TaskIdSchema, durationS: SecondsSchema, first: TimestampSchema.nullable(), last: TimestampSchema.nullable() }).strict()).max(512),
+  /** GSD Core: usage of each plan's executors, with the first and last turn time, by plan id. */
+  plans: z.array(UsageSlotSchema.extend({ id: PlanLaneSchema, durationS: SecondsSchema, first: TimestampSchema.nullable(), last: TimestampSchema.nullable() }).strict()).max(512),
+  /** GSD Core: usage of each phase's agents, its plans' executors included. */
+  phases: z.array(UsageSlotSchema.extend({ id: PhaseIdSchema, durationS: SecondsSchema }).strict()).max(256),
   /** Turns and cost per lane in each ten-minute bucket that had any, oldest first. */
   activity: z.array(z.object({ lane: ActivityLaneSchema, at: TimestampSchema, turns: CountSchema, cost: CostSchema.nullable() }).strict()).max(ACTIVITY_LIMIT),
   /** More buckets had activity than the limit; the oldest are left out. */
@@ -83,6 +96,8 @@ export type BoardUsage = z.infer<typeof BoardUsageSchema>;
 export type UsageTotals = z.infer<typeof UsageTotalsSchema>;
 export type UsageSlot = z.infer<typeof UsageSlotSchema>;
 export type UsageTask = BoardUsage["tasks"][number];
+export type UsagePlan = BoardUsage["plans"][number];
+export type UsagePhase = BoardUsage["phases"][number];
 export type UsageActivity = BoardUsage["activity"][number];
 export type ActivityLane = UsageActivity["lane"];
 export type LedgerRecord = z.infer<typeof LedgerRecordSchema>;

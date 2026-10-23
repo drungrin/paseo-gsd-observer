@@ -7,7 +7,7 @@ import type { BoardTheme } from "./board-components.js";
 import { tint, toneColor, type Tone } from "./ui-kit.js";
 
 /** GSD Core tabs. */
-export const BOARD_TABS = [{ id: "overview", label: "Overview" }, { id: "plans", label: "Plans" }, { id: "context", label: "Context" }, { id: "validation", label: "Validation" }, { id: "verification", label: "Verification" }, { id: "uat", label: "UAT" }, { id: "todos", label: "TODOs" }, { id: "parking", label: "Parking Lot" }, { id: "debug", label: "Debug" }] as const;
+export const BOARD_TABS = [{ id: "overview", label: "Overview" }, { id: "plans", label: "Plans" }, { id: "timeline", label: "Timeline" }, { id: "context", label: "Context" }, { id: "validation", label: "Validation" }, { id: "verification", label: "Verification" }, { id: "uat", label: "UAT" }, { id: "todos", label: "TODOs" }, { id: "parking", label: "Parking Lot" }, { id: "debug", label: "Debug" }, { id: "ledger", label: "Ledger" }] as const;
 /** GSD Path tabs. */
 export const PATH_TABS = [{ id: "overview", label: "Overview" }, { id: "tasks", label: "Tasks" }, { id: "timeline", label: "Timeline" }, { id: "reviews", label: "Reviews" }, { id: "roadmap", label: "Roadmap" }, { id: "questions", label: "Questions" }, { id: "ledger", label: "Ledger" }] as const;
 export type BoardTab = typeof BOARD_TABS[number]["id"] | typeof PATH_TABS[number]["id"];

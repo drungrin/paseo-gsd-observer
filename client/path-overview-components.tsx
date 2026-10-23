@@ -5,10 +5,10 @@ import type { BoardTab } from "./board-tabs.js";
 import { AgentChip, BoardFrame, Needs, plural, tokenLabel, type Need, type ThemeProps, type WorkspaceAgent } from "./board-frame.js";
 import { SetupNotice, taskLegend, TaskBar, warningAlerts } from "./path-components.js";
 import { Heartbeat } from "./path-timeline-components.js";
-import { USAGE_SOURCE, usageAlerts, usageNotice } from "./path-usage-components.js";
+import { ModelBars, TokenMix, USAGE_SOURCE, usageAlerts, UsageFigures } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
-import { duration, integer, money, tokens } from "./usage-format.js";
-import { BarRow, FadeIn, figures, kicker, Legend, Pill, RelativeTime, Section, SegmentBar, shortDate, Stat, StationTrack, surface, text, tint, toneColor } from "./ui-kit.js";
+import { integer, money } from "./usage-format.js";
+import { BarRow, FadeIn, figures, kicker, Legend, Pill, RelativeTime, Section, shortDate, Stat, StationTrack, surface, text, tint, toneColor } from "./ui-kit.js";
 
 
 /** The GSD Path v2 phases in pipeline order; inspect runs on existing code only, roadmap only in program flow, research and decide when questions are open. */
@@ -113,20 +113,6 @@ function Hero({ path, usage, agent, theme, compact, onNavigate }: ThemeProps & {
   </View>;
 }
 
-function Figures({ usage, theme }: ThemeProps & { usage: UsageViewState }) {
-  const value = usage.usage?.availability === "available" ? usage.usage : null;
-  if (!value) return <Text accessibilityLiveRegion="polite" style={text(theme, 13, "400", true)}>{usageNotice(usage)}</Text>;
-  const { totals } = value;
-  const inputs = totals.tokensIn + totals.tokensCached;
-  const hit = inputs ? totals.tokensCached / inputs : null;
-  return <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-    <Stat theme={theme} label="Spent" value={money(totals.cost)} detail={totals.cost !== null && totals.pricedTurns ? `${money(totals.cost / totals.pricedTurns)} per turn` : value.pricing === "missing" ? "No price table" : "No model has a price"} />
-    <Stat theme={theme} label="Agent time" value={totals.timedTurns ? duration(totals.durationS) : "—"} detail={totals.timedTurns ? `${Math.round(totals.durationS / totals.timedTurns)}s per turn` : null} />
-    <Stat theme={theme} label="Turns" value={integer(totals.turns)} detail={`${integer(totals.prompts)} prompts · ${plural(value.sessions, "session log")}`} />
-    <Stat theme={theme} label="Cache hit" value={hit === null ? "—" : `${Math.round(100 * hit)}%`} detail={`${tokens(totals.tokensIn + totals.tokensCached + totals.tokensOut)} tokens`} tone={hit !== null && hit >= 0.8 ? "success" : undefined} />
-  </View>;
-}
-
 function Spend({ usage, path, theme, onNavigate }: ThemeProps & { usage: UsageViewState; path: BoardPath; onNavigate(tab: BoardTab): void }) {
   const value = usage.usage?.availability === "available" ? usage.usage : null;
   if (!value) return null;
@@ -134,25 +120,13 @@ function Spend({ usage, path, theme, onNavigate }: ThemeProps & { usage: UsageVi
   const titles = new Map([...path.tasks.waves.flatMap((wave) => wave.tasks), ...path.tasks.unassigned].map((task) => [task.id, task.title]));
   const costliest = value.tasks.filter((task) => task.cost !== null).sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0)).slice(0, 5);
   const taskCost = value.tasks.reduce((sum, task) => sum + (task.cost ?? 0), 0);
-  const models = value.models.filter((model) => model.cost).slice(0, 4);
-  const topModel = Math.max(0, ...models.map((model) => model.cost ?? 0));
-  const cached = tint(theme, toneColor(theme, "success"), 0.7);
   return <Section title="Where the money went" overline="Host session logs" theme={theme} gap={16}>
-    <View style={{ gap: 8 }}>
-      <Text style={kicker(theme)}>Token mix</Text>
-      <SegmentBar theme={theme} height={14} label={`${tokens(totals.tokensCached)} cached reads, ${tokens(totals.tokensIn)} new input, ${tokens(totals.tokensOut)} output`} segments={[
-        { label: "cached", value: totals.tokensCached, color: cached }, { label: "input", value: totals.tokensIn, color: toneColor(theme, "accent") }, { label: "output", value: totals.tokensOut, color: toneColor(theme, "warning") },
-      ]} />
-      <Legend theme={theme} items={[{ color: cached, label: `${tokens(totals.tokensCached)} cached reads` }, { color: toneColor(theme, "accent"), label: `${tokens(totals.tokensIn)} new input` }, { color: toneColor(theme, "warning"), label: `${tokens(totals.tokensOut)} output` }]} />
-    </View>
+    <TokenMix totals={totals} theme={theme} />
     {costliest.length > 0 && <View style={{ gap: 10 }}>
       <Text style={kicker(theme)}>Costliest tasks{totals.cost ? ` · task agents spent ${Math.round(100 * taskCost / totals.cost)}%` : ""}</Text>
       {costliest.map((task) => <BarRow key={task.id} theme={theme} label={task.id} detail={titles.get(task.id)} value={task.cost ?? 0} max={costliest[0].cost ?? 0} figure={money(task.cost)} color={toneColor(theme, "accent")} onPress={() => onNavigate("tasks")} />)}
     </View>}
-    {models.length > 0 && <View style={{ gap: 10 }}>
-      <Text style={kicker(theme)}>Models</Text>
-      {models.map((model) => <BarRow key={`${model.model}:${model.host}`} theme={theme} label={model.model ?? "unknown"} detail={`${integer(model.turns)} turns`} value={model.cost ?? 0} max={topModel} figure={money(model.cost)} color={tint(theme, theme.colors.foregroundMuted, 0.6)} />)}
-    </View>}
+    <ModelBars usage={value} theme={theme} />
   </Section>;
 }
 
@@ -221,7 +195,7 @@ export function PathOverviewView({ state, usage, agent = null, onRefresh, onNavi
       <FadeIn><Hero path={path} usage={usage} agent={agent} theme={theme} compact={compact} onNavigate={onNavigate} /></FadeIn>
       <FadeIn delay={80}><Needs needs={needsFor(path, agent)} calm={`No open question, failed task or blocking review is recorded${path.state.shipped ? "." : ", and no agent is waiting for input."}`} theme={theme} onNavigate={onNavigate} /></FadeIn>
       {path.state.shipped && <ReportCard path={path} usage={usage} theme={theme} />}
-      <FadeIn delay={140}><Figures usage={usage} theme={theme} /></FadeIn>
+      <FadeIn delay={140}><UsageFigures usage={usage} theme={theme} /></FadeIn>
       <FadeIn delay={200}><View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "flex-start", gap: 16 }}>
         <View style={column}><Latest path={path} theme={theme} /></View>
         <View style={column}><Spend usage={usage} path={path} theme={theme} onNavigate={onNavigate} /></View>
