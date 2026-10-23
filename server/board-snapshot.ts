@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type { BoardSnapshot } from "../shared/board-rpc.js";
 import type { AllowedInventory, InventoryWarning } from "./allowed-reader.js";
 import { buildOverview } from "./overview.js";
+import { buildPath } from "./path-board.js";
 
 const warnings = (values: readonly InventoryWarning[]) => [...new Set(values)].slice(0, 16);
 
@@ -19,10 +20,18 @@ function omitLocalRoots<T>(value: T, roots: readonly string[]): T {
   return value;
 }
 
-/** Freshness metadata plus the overview projections every tab reads; the workspace is available once its current roadmap was read. */
+/**
+ * Freshness metadata plus the projections every tab reads. A GSD Core workspace is available once its current roadmap was read;
+ * a GSD Path workspace once its state was read or its install shows no milestone has started.
+ */
 export function buildBoardSnapshot({ workspaceId, inventory, observedAt }: { workspaceId: string; inventory: AllowedInventory; observedAt: string }): BoardSnapshot {
   if (!inventory.available) return { workspaceId, observedAt: null, freshness: "refresh-failed", availability: "unavailable", revision: 0, warnings: warnings(inventory.warnings), limited: inventory.limited };
+  if (inventory.flavor === "gsd-path") {
+    const path = omitLocalRoots(buildPath(inventory), localRoots(inventory.root));
+    const availability = path.setup === "unsupported" ? "unsupported" : path.setup === "not-started" || path.state.availability === "available" ? "available" : "unknown";
+    return { workspaceId, observedAt, freshness: "current", availability, revision: 0, flavor: "gsd-path", path, warnings: warnings(path.setup === "unsupported" ? [...inventory.warnings, "unsupported"] : inventory.warnings), limited: inventory.limited };
+  }
   const roadmapRead = inventory.artifacts.some((artifact) => artifact.kind === "roadmap" && artifact.key === "ROADMAP.md");
   const overview = omitLocalRoots(buildOverview(inventory), localRoots(inventory.root));
-  return { workspaceId, observedAt, freshness: "current", availability: roadmapRead ? "available" : "unknown", revision: 0, overview, warnings: warnings(inventory.warnings), limited: inventory.limited };
+  return { workspaceId, observedAt, freshness: "current", availability: roadmapRead ? "available" : "unknown", revision: 0, flavor: "gsd-core", overview, warnings: warnings(inventory.warnings), limited: inventory.limited };
 }

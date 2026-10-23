@@ -66,10 +66,13 @@ export function leadExcerpt(value: string, max: number): { text: string | null; 
 const hexDigest = /(?<![0-9a-f])[0-9a-f]{32,128}(?![0-9a-f])/gi;
 const uuid = /(?<![0-9a-f])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi;
 
+/** Hash-like values and UUIDs shown as "[omitted]". */
+export const maskDigests = (value: string) => value.replace(hexDigest, "[omitted]").replace(uuid, "[omitted]");
+
 /** Excerpts, never raw Markdown: hash-like values, UUIDs and non-displayable locations are masked even when embedded in otherwise safe prose. */
 export function maskedExcerpt(value: string | null | undefined, max: number): { text: string | null; limited: boolean } {
   if (value === null || value === undefined || !value.trim()) return { text: null, limited: false };
-  const safe = redactPaths(value.replace(hexDigest, "[omitted]").replace(uuid, "[omitted]"));
+  const safe = redactPaths(maskDigests(value));
   const result = leadExcerpt(safe, max);
   return { text: result.text, limited: result.shortened || safe !== value };
 }

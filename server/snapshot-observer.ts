@@ -1,6 +1,7 @@
 import { relative, resolve, sep } from "node:path";
 import { BoardSnapshotSchema, type BoardSnapshot, type BoardStatus } from "../shared/board-rpc.js";
 import { DEBUG_DIRECTORIES, isAllowedDebugFile, isAllowedTodoFile, TODO_DIRECTORIES, type AllowedInventory } from "./allowed-reader.js";
+import { PATH_DIRECTORIES, PATH_DOCUMENTS, PATH_TASK_FILE } from "./path-reader.js";
 
 const DEBOUNCE_MS = 150;
 const phaseDirectory = /^\d+(?:\.\d+)*-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*$/;
@@ -33,7 +34,25 @@ const refreshFailure = (snapshot: BoardSnapshot, warning: BoardSnapshot["warning
   ? { ...snapshot, freshness: "refresh-failed" as const, warnings: warningList([...snapshot.warnings, warning]) }
   : { ...snapshot, freshness: "refresh-failed" as const, availability: "unavailable" as const, warnings: [warning] };
 
+/** `.project/` itself and the validated folders holding allowlisted GSD Path documents. */
+function pathObserverPaths(projectRoot: string, inventory: AllowedInventory): string[] {
+  const folders: readonly string[] = PATH_DIRECTORIES;
+  return [projectRoot, ...(inventory.watchDirectories ?? []).filter((directory) => folders.includes(directory)).map((directory) => resolve(projectRoot, directory))].sort((left, right) => left.localeCompare(right));
+}
+
+function isIgnoredPath(projectRoot: string, candidate: string): boolean {
+  const rel = relative(projectRoot, candidate).split(sep).join("/");
+  if (!rel) return false;
+  if (rel === ".." || rel.startsWith("../") || resolve(projectRoot, rel) !== resolve(candidate)) return true;
+  const parts = rel.split("/");
+  const folders: readonly string[] = PATH_DIRECTORIES;
+  if (parts.length === 1) return !folders.includes(parts[0]) && !PATH_DOCUMENTS.some(([key]) => key === parts[0]);
+  if (parts.length !== 2) return true;
+  return parts[0] === "tasks" ? !PATH_TASK_FILE.test(parts[1]) : !PATH_DOCUMENTS.some(([key]) => key === rel);
+}
+
 function observerPaths(planningRoot: string, inventory: AllowedInventory): string[] {
+  if (inventory.flavor === "gsd-path") return pathObserverPaths(planningRoot, inventory);
   const values = new Set<string>([planningRoot]);
   for (const directory of inventory.watchDirectories ?? []) {
     const segments = directory.split("/");
@@ -104,11 +123,16 @@ export function createSnapshotObserver(options: SnapshotObserverOptions): Snapsh
   };
   const installWatcher = async (inventory: AllowedInventory) => {
     if (!options.watcherFactory || !inventory.available || closed) return;
-    const paths = observerPaths(options.planningRoot, inventory);
+    // The inventory names the evidence directory it read, so a workspace that moves between GSD Core and GSD Path is watched
+    // where it now lives; a GSD Path install with no `.project/` yet has nothing to watch.
+    const evidenceRoot = inventory.planningRoot ?? (inventory.flavor === "gsd-path" ? undefined : options.planningRoot);
+    if (!evidenceRoot) { await stopWatcher(); return; }
+    const paths = observerPaths(evidenceRoot, inventory);
     if (watcher && watchedPaths.length === paths.length && watchedPaths.every((path, index) => path === paths[index])) return;
     const previous = watcher;
     const addedPaths = Boolean(previous && paths.some((path) => !watchedPaths.includes(path)));
-    const next = options.watcherFactory(paths, { followSymlinks: false, ignoreInitial: true, depth: 0, ignored: (path) => isIgnored(options.planningRoot, path) });
+    const ignored = inventory.flavor === "gsd-path" ? (path: string) => isIgnoredPath(evidenceRoot, path) : (path: string) => isIgnored(evidenceRoot, path);
+    const next = options.watcherFactory(paths, { followSymlinks: false, ignoreInitial: true, depth: 0, ignored });
     const onChange = () => { if (watcher === next) delayedInvalidate(); };
     next.on("add", onChange).on("change", onChange).on("unlink", onChange)
       .on("addDir", onChange).on("unlinkDir", onChange)

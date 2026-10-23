@@ -1,8 +1,8 @@
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { View } from "react-native";
-import { BoardTabs, type BoardTab, type TabFocusTarget } from "./board-tabs.js";
+import { BoardTabs, tabsFor, type BoardTab, type TabFocusTarget } from "./board-tabs.js";
 import { OverviewView } from "./overview-components.js";
 import { PlansView } from "./plans-components.js";
 import { ContextView } from "./context-components.js";
@@ -12,6 +12,8 @@ import { VerificationView } from "./verification-components.js";
 import { TodosView } from "./todos-components.js";
 import { ParkingLotView } from "./parking-lot-components.js";
 import { DebugView } from "./debug-components.js";
+import { PathOverviewView } from "./path-overview-components.js";
+import { PathTasksView } from "./path-tasks-components.js";
 import { boardRpc, type BoardRequest, type BoardResponse } from "../shared/board-rpc.js";
 import { createBoardState, type BoardReadingState } from "./board-state.js";
 import type { BoardTheme } from "./board-components.js";
@@ -61,39 +63,31 @@ export function BoardPanel({ workspaceId, theme, layout }: PluginWorkspacePanelP
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const tabRefs = useRef<Partial<Record<BoardTab, TabFocusTarget | null>>>({});
   const idPrefix = `board-${useId().replace(/:/g, "")}`;
-  const activeTab = tabSelection.workspaceId === workspaceId ? tabSelection.tab : "overview";
+  const flavor = state.snapshot?.flavor;
+  const tabs = tabsFor(flavor);
+  const selectedTab = tabSelection.workspaceId === workspaceId ? tabSelection.tab : "overview";
+  const activeTab = tabs.some((tab) => tab.id === selectedTab) ? selectedTab : "overview";
   const compact = layout.compact || panelWidth !== null && panelWidth < 760;
   const onRefresh = () => { void controller.dispatch("refresh"); };
   useEffect(() => { controller.start(); void controller.dispatch("snapshot"); return () => controller.dispose(); }, [controller]);
   useEffect(() => { setShowTable(false); }, [workspaceId]);
+  const view = { state, theme: theme as BoardTheme, compact, onRefresh };
+  const panels: Record<BoardTab, () => ReactNode> = {
+    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} /> : <OverviewView {...view} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
+    plans: () => <PlansView {...view} />,
+    context: () => <ContextView {...view} />,
+    validation: () => <ValidationView {...view} />,
+    verification: () => <VerificationView {...view} />,
+    uat: () => <UatView {...view} />,
+    todos: () => <TodosView {...view} />,
+    parking: () => <ParkingLotView {...view} />,
+    debug: () => <DebugView {...view} />,
+    tasks: () => <PathTasksView {...view} />,
+  };
   return <View onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
-    <BoardTabs activeTab={activeTab} focusedTab={focusedTab} onSelect={(tab) => setTabSelection({ workspaceId, tab })} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />
-    <View nativeID={`${idPrefix}-panel-overview`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-overview`} aria-hidden={activeTab !== "overview"} importantForAccessibility={activeTab === "overview" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "overview" ? "flex" : "none" }}>
-      <OverviewView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-plans`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-plans`} aria-hidden={activeTab !== "plans"} importantForAccessibility={activeTab === "plans" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "plans" ? "flex" : "none" }}>
-      <PlansView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-context`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-context`} aria-hidden={activeTab !== "context"} importantForAccessibility={activeTab === "context" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "context" ? "flex" : "none" }}>
-      <ContextView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-validation`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-validation`} aria-hidden={activeTab !== "validation"} importantForAccessibility={activeTab === "validation" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "validation" ? "flex" : "none" }}>
-      <ValidationView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-verification`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-verification`} aria-hidden={activeTab !== "verification"} importantForAccessibility={activeTab === "verification" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "verification" ? "flex" : "none" }}>
-      <VerificationView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-uat`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-uat`} aria-hidden={activeTab !== "uat"} importantForAccessibility={activeTab === "uat" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "uat" ? "flex" : "none" }}>
-      <UatView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-todos`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-todos`} aria-hidden={activeTab !== "todos"} importantForAccessibility={activeTab === "todos" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "todos" ? "flex" : "none" }}>
-      <TodosView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-parking`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-parking`} aria-hidden={activeTab !== "parking"} importantForAccessibility={activeTab === "parking" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "parking" ? "flex" : "none" }}>
-      <ParkingLotView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
-    <View nativeID={`${idPrefix}-panel-debug`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-debug`} aria-hidden={activeTab !== "debug"} importantForAccessibility={activeTab === "debug" ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === "debug" ? "flex" : "none" }}>
-      <DebugView state={state} theme={theme as BoardTheme} compact={compact} onRefresh={onRefresh} />
-    </View>
+    <BoardTabs tabs={tabs} activeTab={activeTab} focusedTab={focusedTab} onSelect={(tab) => setTabSelection({ workspaceId, tab })} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />
+    {tabs.map(({ id }) => <View key={id} nativeID={`${idPrefix}-panel-${id}`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-${id}`} aria-hidden={activeTab !== id} importantForAccessibility={activeTab === id ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === id ? "flex" : "none" }}>
+      {panels[id]()}
+    </View>)}
   </View>;
 }

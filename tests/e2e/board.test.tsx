@@ -18,9 +18,12 @@ vi.mock("react", async (importOriginal) => {
 import { createBoardController } from "../../index.client";
 import { OverviewView } from "../../client/overview-components";
 import { PlansView } from "../../client/plans-components";
+import { PathOverviewView } from "../../client/path-overview-components";
+import { PathTasksView } from "../../client/path-tasks-components";
 import { createBoardService } from "../../index.server";
 import { boardRpc } from "../../shared/board-rpc";
 import { fixtureFiles } from "../fixtures/gsd-fixtures";
+import { forkFiles, upstreamFiles } from "../fixtures/path-fixtures";
 import { FakeHost } from "../helpers/fake-host";
 import { FixtureWorkspace } from "../helpers/fixture-workspace";
 import { FakeWatcher } from "../helpers/fake-watcher";
@@ -63,6 +66,27 @@ describe("board tracer", () => {
     controller.dispose();
     await service.close();
     await workspace.cleanup();
+  });
+
+  it("serves a GSD Path workspace, fork or upstream, through the same refresh-to-tasks path", async () => {
+    for (const [files, branch] of [[forkFiles, "feature/milestone-001"], [upstreamFiles, "gsd-path/M001"]] as const) {
+      const workspace = await FixtureWorkspace.create(files);
+      const host = new FakeHost();
+      host.registerWorkspace("selected", workspace.root);
+      const service = createBoardService({ resolveWorkspace: async (id) => host.resolveWorkspace(id) });
+      host.handle(boardRpc, (input) => service.handle(input as never));
+      const controller = createBoardController({ workspaceId: "selected", callBoardRpc: (input) => host.invoke(boardRpc, input, "selected") });
+      await controller.dispatch("refresh");
+      expect(controller.getState().snapshot).toMatchObject({ flavor: "gsd-path", availability: "available", freshness: "current", path: { setup: "started", state: { branch } } });
+      expect(controller.getState().snapshot?.overview).toBeUndefined();
+      for (const compact of [false, true]) {
+        expect(text(expand(PathOverviewView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain(branch);
+        expect(text(expand(PathTasksView({ state: controller.getState(), onRefresh: () => undefined, theme, compact })))).toContain("Wave 1");
+      }
+      controller.dispose();
+      await service.close();
+      await workspace.cleanup();
+    }
   });
 
   it("reads a real selected workspace only after the refresh intent", async () => {
@@ -119,7 +143,7 @@ describe("board tracer", () => {
   });
 
   it("keeps client and shared imports inside the read-only plugin boundary", async () => {
-    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "shared/board-rpc.ts"];
+    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "shared/board-rpc.ts", "shared/path.ts"];
     const sources = await Promise.all(files.map(async (file) => ({ file, source: await readFile(file, "utf8") })));
     for (const { file, source } of sources) {
       const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

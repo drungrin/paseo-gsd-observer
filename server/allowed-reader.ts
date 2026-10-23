@@ -1,29 +1,31 @@
-import { constants, type Stats } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { join } from "node:path";
 import { comparePhaseIds } from "./gsd-decoder.js";
-import { isStrictDescendant, resolveWorkspaceRoot } from "./workspace-root.js";
+import { readPathInventory } from "./path-reader.js";
+import { DIRECTORY_ENTRIES, FILE_BYTES, listDirectory, readSafeFile, SNAPSHOT_BYTES, TIMEOUT_MS, validateSafeDirectory, withTimeout } from "./safe-files.js";
+import { resolveWorkspaceRoot, type Flavor } from "./workspace-root.js";
 
 export const LIMITS = {
-  bytesPerFile: 256 * 1024,
-  bytesPerSnapshot: 32 * 1024 * 1024,
-  directoryEntries: 2048,
+  bytesPerFile: FILE_BYTES,
+  bytesPerSnapshot: SNAPSHOT_BYTES,
+  directoryEntries: DIRECTORY_ENTRIES,
   artifacts: 2048,
   phases: 256,
   plansPerPhase: 128,
   titleLength: 200,
   identifierLength: 64,
   warningsPerItem: 16,
-  timeoutMs: 10_000,
+  timeoutMs: TIMEOUT_MS,
 } as const;
 
 export type InventoryWarning = "absent" | "oversize" | "malformed" | "truncated" | "unsupported" | "containment-refused" | "unreadable" | "limit-reached" | "observation-limited" | "inconsistent";
 export type PhaseCheckKind = "research" | "spec" | "skeleton" | "security" | "patterns" | "ui-spec" | "ai-spec" | "plan-check" | "ui-check" | "validation" | "windows" | "deferred-items" | "ui-review" | "eval-review" | "coverage";
-export type ArtifactKind = "roadmap" | "state" | "requirements" | "todo" | "debug" | "context" | "plan" | "summary" | "verification" | "uat" | "review" | PhaseCheckKind;
+/** GSD Path documents have their own kinds, so GSD Core projections never read them. */
+export type PathArtifactKind = "path-state" | "path-roadmap" | "path-plan" | "path-next-state" | "path-task";
+export type ArtifactKind = "roadmap" | "state" | "requirements" | "todo" | "debug" | "context" | "plan" | "summary" | "verification" | "uat" | "review" | PhaseCheckKind | PathArtifactKind;
 export type AllowedArtifact = { key: string; kind: ArtifactKind; phaseId?: string; bytes: Uint8Array; size: number };
 export type InventoryProblem = { phaseId?: string; kind?: ArtifactKind; warning: InventoryWarning };
 /** Debug sessions live apart from `artifacts`: they have their own budget, so they neither starve nor are starved by phase evidence. */
-export type AllowedInventory = { available: boolean; root?: string; planningRoot?: string; watchDirectories?: string[]; artifacts: AllowedArtifact[]; debugArtifacts?: AllowedArtifact[]; problems: InventoryProblem[]; warnings: InventoryWarning[]; limited: boolean };
+export type AllowedInventory = { available: boolean; flavor?: Flavor; root?: string; planningRoot?: string; watchDirectories?: string[]; artifacts: AllowedArtifact[]; debugArtifacts?: AllowedArtifact[]; problems: InventoryProblem[]; warnings: InventoryWarning[]; limited: boolean };
 
 const phaseIdPattern = "\\d+(?:\\.\\d+)*";
 const phaseDirPattern = new RegExp(`^(${phaseIdPattern})-([A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)$`);
@@ -43,77 +45,6 @@ export const isAllowedTodoFile = (name: string) => name.length <= 200 && /^[A-Za
 export const isAllowedDebugFile = isAllowedTodoFile;
 const canonicalPhaseId = (value: string) => value.split(".").map((part) => part.replace(/^0+(?=\d)/, "")).join(".");
 const warningList = (values: readonly InventoryWarning[]) => [...new Set(values)].slice(0, LIMITS.warningsPerItem);
-const withTimeout = async <T>(work: Promise<T>, timeoutMs: number = LIMITS.timeoutMs): Promise<T> => new Promise<T>((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error("timed out")), timeoutMs);
-  void work.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
-});
-const isMissing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === "ENOENT";
-async function safeStat(path: string): Promise<{ stat?: Stats; warning?: InventoryWarning }> {
-  try { return { stat: await lstat(path) }; }
-  catch (error) { return { warning: isMissing(error) ? "absent" : "unreadable" }; }
-}
-
-async function readSafeFile(planningRoot: string, file: string): Promise<{ bytes?: Uint8Array; warning?: InventoryWarning }> {
-  const parent = dirname(file);
-  const parentResult = await safeStat(parent);
-  if (!parentResult.stat) return { warning: parentResult.warning };
-  const parentBefore = parentResult.stat;
-  if (!parentBefore.isDirectory() || parentBefore.isSymbolicLink()) return { warning: "containment-refused" };
-  const beforeResult = await safeStat(file);
-  if (!beforeResult.stat) return { warning: beforeResult.warning };
-  const before = beforeResult.stat;
-  if (!before.isFile() || before.isSymbolicLink()) return { warning: "containment-refused" };
-  if (before.size > LIMITS.bytesPerFile) return { warning: "oversize" };
-  let canonical: string;
-  try { canonical = await realpath(file); }
-  catch (error) { return { warning: isMissing(error) ? "inconsistent" : "unreadable" }; }
-  if (!isStrictDescendant(planningRoot, canonical)) return { warning: "containment-refused" };
-  let handle;
-  try {
-    handle = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const descriptor = await handle.stat();
-    if (!descriptor.isFile() || descriptor.dev !== before.dev || descriptor.ino !== before.ino || descriptor.size !== before.size) return { warning: "inconsistent" };
-    const buffer = Buffer.alloc(Math.min(descriptor.size, LIMITS.bytesPerFile) + 1);
-    const result = await handle.read(buffer, 0, buffer.length, 0);
-    const after = await handle.stat();
-    const parentAfter = await safeStat(parent);
-    if (parentAfter.warning === "unreadable") return { warning: "unreadable" };
-    if (!parentAfter.stat || parentAfter.stat.dev !== parentBefore.dev || parentAfter.stat.ino !== parentBefore.ino || result.bytesRead > LIMITS.bytesPerFile || after.size > LIMITS.bytesPerFile) return { warning: result.bytesRead > LIMITS.bytesPerFile || after.size > LIMITS.bytesPerFile ? "oversize" : "inconsistent" };
-    if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size) return { warning: "inconsistent" };
-    return { bytes: buffer.subarray(0, result.bytesRead) };
-  } catch {
-    return { warning: "unreadable" };
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
-}
-
-async function listDirectory(path: string): Promise<{ entries: string[]; warning?: InventoryWarning }> {
-  const entries: string[] = [];
-  let directory;
-  try {
-    directory = await opendir(path);
-    for await (const entry of directory) {
-      entries.push(entry.name);
-      if (entries.length > LIMITS.directoryEntries) return { entries, warning: "limit-reached" };
-    }
-    return { entries };
-  } catch {
-    return { entries, warning: "unreadable" };
-  } finally {
-    await directory?.close().catch(() => undefined);
-  }
-}
-
-async function validateSafeDirectory(planningRoot: string, path: string): Promise<InventoryWarning | undefined> {
-  const result = await safeStat(path);
-  if (!result.stat) return result.warning;
-  if (!result.stat.isDirectory() || result.stat.isSymbolicLink()) return "containment-refused";
-  let canonical: string;
-  try { canonical = await realpath(path); }
-  catch (error) { return isMissing(error) ? "inconsistent" : "unreadable"; }
-  return isStrictDescendant(planningRoot, canonical) ? undefined : "containment-refused";
-}
 
 function kindForPhaseFile(name: string): ArtifactKind | null {
   const match = phaseFilePattern.exec(name);
@@ -135,7 +66,7 @@ function currentPhaseHint(bytes: Uint8Array | undefined): string | null {
   return value && isSafeSegment(value) ? canonicalPhaseId(value) : null;
 }
 
-/** Current planning evidence only: root documents, current phases and their checks, TODOs and debug sessions. */
+/** Current planning evidence only: root documents, current phases and their checks, TODOs and debug sessions; GSD Path workspaces read their own allowlist. */
 export async function readAllowedInventory(directory: string): Promise<AllowedInventory> {
   try {
     return await withTimeout(readInventory(directory));
@@ -148,6 +79,7 @@ async function readInventory(directory: string): Promise<AllowedInventory> {
   const startedAt = Date.now();
   const root = await resolveWorkspaceRoot(directory);
   if (!root.available) return { available: false, artifacts: [], problems: [], warnings: [root.warning], limited: false };
+  if (root.flavor === "gsd-path") return readPathInventory(root.root, root.planningRoot);
   const artifacts: AllowedArtifact[] = [];
   const problems: InventoryProblem[] = [];
   const warnings: InventoryWarning[] = [];
@@ -339,5 +271,5 @@ async function readInventory(directory: string): Promise<AllowedInventory> {
   await addOptionalChecks();
   await addTodos();
   await addDebug();
-  return { available: true, root: root.root, planningRoot: root.planningRoot, watchDirectories, artifacts, debugArtifacts, problems, warnings: warningList(warnings), limited };
+  return { available: true, flavor: "gsd-core", root: root.root, planningRoot: root.planningRoot, watchDirectories, artifacts, debugArtifacts, problems, warnings: warningList(warnings), limited };
 }

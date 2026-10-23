@@ -18,7 +18,7 @@ export function statusLabel(status: string | null): string {
   return status.replace(/_/g, " ");
 }
 
-function dateLabel(value: string | null): string {
+export function dateLabel(value: string | null): string {
   if (!value) return "Not recorded";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
