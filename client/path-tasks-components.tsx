@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import type { BoardPath, PathTask, PathWave } from "../shared/path.js";
 import type { UsageTask } from "../shared/usage.js";
 import type { BoardViewState } from "./board-components.js";
-import { Badge, borderColor, Card, PathFrame, plural, SetupNotice, smallStyle, statusColor, statusGlyph, statusTone, taskLegend, TaskBar, textStyle, tokenLabel, warningAlerts, type ThemeProps } from "./path-components.js";
+import { Badge, borderColor, Card, BoardFrame, plural, smallStyle, textStyle, tokenLabel, type ThemeProps } from "./board-frame.js";
+import { SetupNotice, statusColor, statusGlyph, statusTone, taskLegend, TaskBar, warningAlerts } from "./path-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { duration, integer, money } from "./usage-format.js";
 import { clockTime, figures, Flash, kicker, Legend, line, Pill, Pulse, Section, Stat, surface, text, tint, toneColor, Toggle } from "./ui-kit.js";
@@ -47,7 +48,7 @@ function Tile({ task, spend, maxCost, mode, selected, relation, flash, onPress, 
   const border = selected ? accent : relation === "upstream" ? toneColor(theme, "warning") : relation === "downstream" ? theme.colors.foreground : pending ? line(theme) : "transparent";
   const relationWords = relation === "upstream" ? ", needed by the selected task" : relation === "downstream" ? ", waits on the selected task" : "";
   return <View role="listitem"><Flash signal={flash} color={accent} radius={12}>
-    <Pressable role="button" accessibilityState={{ selected }} accessibilityLabel={`${task.id}, ${tokenLabel(task.status, "status not recorded")}${task.title ? `, ${task.title}` : ""}${spend?.cost != null ? `, ${money(spend.cost)}` : ""}${relationWords}`} onPress={onPress}
+    <Pressable role="button" accessibilityState={{ selected }} {...(Platform.OS === "web" ? { "aria-pressed": selected } : {})} accessibilityLabel={`${task.id}, ${tokenLabel(task.status, "status not recorded")}${task.title ? `, ${task.title}` : ""}${spend?.cost != null ? `, ${money(spend.cost)}` : ""}${relationWords}`} onPress={onPress}
       // React Native Web reports hover to the style callback; native platforms never set it.
       style={(state) => ({ width: 92, height: 68, padding: 9, justifyContent: "space-between", borderRadius: 12, backgroundColor: background, borderWidth: selected || relation ? 2 : 1, borderColor: border, borderStyle: relation || pending ? "dashed" : "solid", transform: [{ translateY: (state as { hovered?: boolean }).hovered ? -2 : 0 }] })}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -170,7 +171,7 @@ export function PathTasksView({ state, usage, onRefresh, theme, compact = false 
   const flash = (id: string) => changes && Date.now() - changes.at < FLASH_MS && changes.tasks.includes(id) ? changes.at : null;
   const select = (id: string) => setPicked({ workspaceId: state.workspaceId, id });
   const lane = (wave: PathWave, label: string) => <WaveLane key={wave.number} wave={wave} label={label} spend={spend} maxCost={maxCost} mode={mode} selected={selected?.id ?? null} related={related} flash={flash} onSelect={select} theme={theme} compact={compact} />;
-  return <PathFrame title="Tasks" description="Every task of the current milestone, wave by wave. Select one to see what it needs and what it unblocks." subject="tasks" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={warningAlerts(path, (warning) => warning.startsWith("plan-") || warning.startsWith("task"))} notes={tasksNotes(path)}>
+  return <BoardFrame title="Tasks" description="Every task of the current milestone, wave by wave. Select one to see what it needs and what it unblocks." subject="tasks" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={warningAlerts(path, (warning) => warning.startsWith("plan-") || warning.startsWith("task"))} notes={tasksNotes(path)}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : tasks?.availability === "available" ? <>
       <View style={{ gap: 10 }}>
         <TaskBar path={path} theme={theme} height={14} />
@@ -194,5 +195,5 @@ export function PathTasksView({ state, usage, onRefresh, theme, compact = false 
     </> : <Card title={tasks?.availability === "absent" ? "No tasks yet" : "Tasks unavailable"} theme={theme}>
       <Text style={textStyle(theme, true)}>{tasks?.availability === "absent" ? "No plan or task files yet. GSD Path writes them in the plan phase." : "The plan and task files could not be read safely."}</Text>
     </Card>}
-  </PathFrame>;
+  </BoardFrame>;
 }

@@ -1,12 +1,19 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import type { BoardOverview } from "../shared/overview.js";
 import type { BoardTheme, BoardViewState } from "./board-components.js";
+import { AgentChip, BoardFrame, Needs, plural, type Need, type ThemeProps, type WorkspaceAgent } from "./board-frame.js";
+import type { BoardTab, TabBadge } from "./board-tabs.js";
+import { phaseStages, stagesLabel } from "./phase-checks.js";
+import { phaseSummary as uatSummary } from "./uat-components.js";
+import { phaseSummary as validationSummary } from "./validation-components.js";
+import { phaseSummary as verificationSummary } from "./verification-components.js";
+import { FadeIn, figures, kicker, Legend, line, Pill, RelativeTime, Section, SegmentBar, Stat, StationTrack, surface, text, tint, toneColor, Toggle, type Tone, type TrackStation } from "./ui-kit.js";
+
+export { dateLabel } from "./ui-kit.js";
 
 type OverviewPhase = BoardOverview["roadmap"]["phases"][number];
-type ThemeProps = { theme: BoardTheme };
-const textStyle = (theme: BoardTheme, muted = false) => ({ color: muted ? theme.colors.foregroundMuted : theme.colors.foreground, fontSize: 14, lineHeight: 21, flexShrink: 1 });
 
 export function statusLabel(status: string | null): string {
   if (!status) return "Not recorded";
@@ -18,81 +25,194 @@ export function statusLabel(status: string | null): string {
   return status.replace(/_/g, " ");
 }
 
-export function dateLabel(value: string | null): string {
-  if (!value) return "Not recorded";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
-}
+const statusTone = (label: string): Tone => label === "Complete" ? "success" : label === "Executing" || label === "In progress" ? "accent" : label === "Verifying" ? "warning" : "neutral";
 
 export function planCountLabel(phase: OverviewPhase): string {
   if (phase.totalPlans === null) return phase.completedPlans === null ? "Plans not declared" : `${phase.completedPlans} plans completed · total TBD`;
   return `${phase.completedPlans ?? "—"} / ${phase.totalPlans} plans`;
 }
 
-function Card({ title, source, action, children, theme, compact }: ThemeProps & { title: string; source: string; action?: ReactNode; children: ReactNode; compact: boolean }) {
-  return <View style={{ flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" : 0, minWidth: 0, padding: 20, gap: 20, borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-      <View style={{ gap: 4 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 16, fontWeight: "600" }}>{title}</Text><Text style={{ ...textStyle(theme, true), fontSize: 11, letterSpacing: 0.3 }}>{source}</Text></View>
-      {action}
-    </View>
-    {children}
-  </View>;
-}
-
-function StateField({ label, value, detail, theme }: ThemeProps & { label: string; value: string; detail?: string | null }) {
-  return <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 16 }}>
-    <Text style={{ ...textStyle(theme, true), width: 84 }}>{label}</Text>
-    <View style={{ flex: 1, minWidth: 0, gap: 3 }}><Text style={{ ...textStyle(theme), fontWeight: "500" }}>{value}</Text>{detail && <Text style={{ ...textStyle(theme, true), fontSize: 13 }}>{detail}</Text>}</View>
-  </View>;
-}
-
-function StateCard({ state, theme, compact }: ThemeProps & { state: BoardOverview["state"] | undefined; compact: boolean }) {
-  return Card({ title: "State", source: "STATE.md", theme, compact, children: state?.availability === "available" ? <>
-    <View style={{ gap: 18 }}>
-      {StateField({ label: "Milestone", value: state.milestone ?? "Not recorded", detail: state.milestoneName, theme })}
-      {StateField({ label: "Phase", value: state.phaseId ? `Phase ${state.phaseId}` : "Not recorded", detail: state.phaseName, theme })}
-      {StateField({ label: "Status", value: statusLabel(state.status), theme })}
-      {StateField({ label: "Plan", value: state.plan ?? "Not recorded", theme })}
-    </View>
-    <View style={{ gap: 7, paddingTop: 18, borderTopWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
-      <Text style={{ ...textStyle(theme), fontSize: 13, fontWeight: "600" }}>Last activity</Text>
-      <Text style={textStyle(theme, true)}>{state.lastActivity ?? "No activity recorded."}</Text>
-      <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>State updated: {dateLabel(state.updatedAt)}</Text>
-    </View>
-    <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Recorded planning state, not live execution status.</Text>
-  </> : <View style={{ gap: 6 }}><Text style={textStyle(theme)}>State unavailable</Text><Text style={textStyle(theme, true)}>No readable project state was found. Roadmap progress can still be shown independently.</Text></View> });
-}
-
 export function ProgressMeter({ percent, label, theme, large = false }: ThemeProps & { percent: number; label: string; large?: boolean }) {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const value = Math.max(0, Math.min(100, percent));
+  const color = toneColor(theme, value >= 100 ? "success" : "accent");
   return <Pressable role="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: 100, now: value, text: label }} tabIndex={0} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={{ minHeight: 24, justifyContent: "center", position: "relative", zIndex: hovered || focused ? 2 : 0 }}>
-    <View style={{ height: large ? 7 : 4, position: "relative" }}>
-      <View style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, borderRadius: 4, backgroundColor: theme.colors.accent, opacity: 0.15 }} />
-      <View style={{ height: "100%", width: `${value}%`, borderTopRightRadius: 4, borderBottomRightRadius: 4, backgroundColor: theme.colors.accent }} />
+    <View style={{ height: large ? 8 : 5, borderRadius: 4, overflow: "hidden", backgroundColor: surface(theme, 2) }}>
+      <View style={{ height: "100%", width: `${value}%`, borderRadius: 4, backgroundColor: color }} />
     </View>
-    {(hovered || focused) && <View style={{ position: "absolute", bottom: "100%", left: 0, maxWidth: "100%", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface0 }}><Text style={{ ...textStyle(theme), fontSize: 12 }}>{label}</Text></View>}
+    {(hovered || focused) && <View style={{ position: "absolute", bottom: "100%", left: 0, maxWidth: "100%", paddingHorizontal: 9, paddingVertical: 5, borderRadius: 8, backgroundColor: surface(theme, 2) }}><Text style={text(theme, 12)}>{label}</Text></View>}
   </Pressable>;
 }
 
-function phaseStatus(phase: OverviewPhase): string {
-  if (phase.completed) return "Complete";
-  if (phase.current) return "Current";
-  if (phase.completedPlans !== null && phase.completedPlans > 0) return "In progress";
-  return "Not started";
+const phaseStatus = (phase: OverviewPhase) => phase.completed ? "Complete" : phase.current ? "Current" : phase.completedPlans !== null && phase.completedPlans > 0 ? "In progress" : "Not started";
+
+/** The milestone's phases as stations; a long roadmap shows the sixteen around the current phase. */
+export function phaseStations(roadmap: BoardOverview["roadmap"], limit = 16): { stations: TrackStation[]; shown: number } {
+  const phases = roadmap.phases;
+  const current = Math.max(0, phases.findIndex((phase) => phase.current));
+  const start = phases.length <= limit ? 0 : Math.min(Math.max(0, current - Math.floor(limit / 3)), phases.length - limit);
+  const window = phases.slice(start, start + limit);
+  return { shown: window.length, stations: window.map((phase) => ({ key: phase.id, label: phase.id, state: phase.completed ? "done" : phase.current ? "current" : "future",
+    detail: phase.totalPlans !== null ? `${phase.completedPlans ?? "—"}/${phase.totalPlans}` : null })) };
 }
 
-function PhaseRow({ phase, showTable, theme }: ThemeProps & { phase: OverviewPhase; showTable: boolean }) {
-  const progress = phase.percent === null ? "—" : `${phase.percent}%`;
-  return <View key={phase.id} role="listitem" style={{ gap: 4, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: phase.current ? theme.colors.accent : "transparent", backgroundColor: phase.current ? theme.colors.surface2 ?? theme.colors.surface0 : "transparent" }}>
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-      <Text style={{ ...textStyle(theme), flex: 1, minWidth: 0, fontSize: 13, fontWeight: phase.current ? "600" : "400" }}>{phase.completed ? "✓" : "○"}  {phase.id} · {phase.title}</Text>
-      <Text style={{ ...textStyle(theme), fontSize: 13, fontVariant: ["tabular-nums"] }}>{progress}</Text>
+
+type Flagged = { id: string; danger: boolean; text: string };
+const listed = (items: readonly string[]) => items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}` : items[0] ?? "";
+
+/** One line per kind of evidence: a single phase with its summary, several with their ids, the current one marked. */
+function flaggedNeed(kind: string, tab: BoardTab, flagged: readonly Flagged[], current: string | null): Need | null {
+  if (!flagged.length) return null;
+  const tone = flagged.some((phase) => phase.danger) ? "danger" : "warning";
+  if (flagged.length === 1) return { tone, title: `Phase ${flagged[0].id} ${kind} needs a look`, detail: flagged[0].text, tab };
+  const ids = flagged.map((phase) => phase.id === current ? `${phase.id} (current)` : phase.id);
+  const shown = ids.length > 8 ? [...ids.slice(0, 7), `${ids.length - 7} more`] : ids;
+  return { tone, title: `${kind === "UAT" ? kind : `${kind[0].toUpperCase()}${kind.slice(1)}`} needs a look in ${flagged.length} phases`, detail: `Phases ${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`, tab };
+}
+
+/** What waits on a person in a GSD Core milestone: an agent asking for input, UAT, verification and validation needing a look, open debug sessions. */
+export function coreNeeds(overview: BoardOverview, agent: WorkspaceAgent = null): Need[] {
+  const current = overview.state.phaseId;
+  const uat = overview.uat.phases.map((phase) => ({ phase, summary: uatSummary(phase) })).filter(({ summary }) => summary.attention)
+    .map(({ phase, summary }) => ({ id: phase.id, danger: phase.results.issue + phase.results.blocked > 0, text: summary.text }));
+  const verification = overview.verification.phases.map((phase) => ({ phase, summary: verificationSummary(phase) })).filter(({ summary }) => summary.attention)
+    .map(({ phase, summary }) => ({ id: phase.id, danger: phase.statusKind === "gaps_found" || phase.openGapCount > 0, text: summary.text }));
+  const validation = overview.validation.phases.map((phase) => ({ phase, summary: validationSummary(phase) })).filter(({ summary }) => summary.attention)
+    .map(({ phase, summary }) => ({ id: phase.id, danger: false, text: summary.text }));
+  const { debug } = overview;
+  const open = debug.counts.unresolved;
+  const debugPartial = debug.availability === "available" && (!debug.countsComplete || debug.counts.unavailable > 0);
+  // A source that could not be read may hold something that needs a person; say so rather than look calm.
+  const unread: [string, BoardTab][] = ([["UAT", "uat", overview.uat], ["verification", "verification", overview.verification], ["validation", "validation", overview.validation], ["debug", "debug", debug]] as const)
+    .filter(([, , source]) => source.availability !== "available").map(([name, tab]) => [name, tab]);
+  if (debug.availability === "available" && debug.counts.unavailable > 0) unread.push(["some debug files", "debug"]);
+  return [
+    agent?.status === "needs_input" ? { tone: "warning", title: "An agent in this workspace is waiting for your input", detail: null, tab: null } satisfies Need : null,
+    unread.length ? { tone: "warning", title: `${listed(unread.map(([name]) => name))} could not be read`, detail: "Anything recorded there is not shown here.", tab: unread[0][1] } satisfies Need : null,
+    flaggedNeed("UAT", "uat", uat, current),
+    flaggedNeed("verification", "verification", verification, current),
+    flaggedNeed("validation", "validation", validation, current),
+    open ? { tone: "warning", title: `${debugPartial ? "At least " : ""}${plural(open, "debug session")} not resolved`, detail: null, tab: "debug" } satisfies Need : null,
+  ].filter((need): need is Need => need !== null);
+}
+
+/** Plan summaries, phases needing a look, pending TODOs and unresolved debug sessions, beside the GSD Core tabs they belong to. */
+export function coreBadges(overview: BoardOverview | undefined): Partial<Record<BoardTab, TabBadge>> {
+  if (!overview) return {};
+  const flagged = <T,>(phases: readonly T[], summary: (phase: T) => { attention: boolean }) => phases.filter((phase) => summary(phase).attention).length;
+  const uat = flagged(overview.uat.phases, uatSummary);
+  const verification = flagged(overview.verification.phases, verificationSummary);
+  const validation = flagged(overview.validation.phases, validationSummary);
+  const uatDanger = overview.uat.phases.some((phase) => uatSummary(phase).attention && phase.results.issue + phase.results.blocked > 0);
+  const gaps = overview.verification.phases.some((phase) => verificationSummary(phase).attention && (phase.statusKind === "gaps_found" || phase.openGapCount > 0));
+  const { plans, todos, debug } = overview;
+  const open = debug.availability === "available" ? debug.counts.unresolved : 0;
+  const atLeast = (value: number, partial: boolean) => partial ? `≥${value}` : String(value);
+  return {
+    ...(plans.availability === "available" && plans.observedPlans ? { plans: { label: `${plans.observedSummaries}/${plans.observedPlans}`, tone: plans.observedSummaries >= plans.observedPlans && plans.phases.every((phase) => phase.declaredPlans !== null) ? "success" : "neutral" } } : {}),
+    ...(uat ? { uat: { label: String(uat), tone: uatDanger ? "danger" : "warning" } } : {}),
+    ...(verification ? { verification: { label: String(verification), tone: gaps ? "danger" : "warning" } } : {}),
+    ...(validation ? { validation: { label: String(validation), tone: "warning" } } : {}),
+    ...(todos.availability === "available" && todos.counts.pending ? { todos: { label: atLeast(todos.counts.pending, !todos.countsComplete) } } : {}),
+    ...(open ? { debug: { label: atLeast(open, !debug.countsComplete || debug.counts.unavailable > 0), tone: "warning" } } : {}),
+  };
+}
+
+function Hero({ overview, agent, theme, compact }: ThemeProps & { overview: BoardOverview; agent: WorkspaceAgent; compact: boolean }) {
+  const { state, roadmap, plans } = overview;
+  const current = roadmap.phases.find((phase) => phase.current);
+  const position = current ? roadmap.phases.indexOf(current) + 1 : null;
+  const planPhase = plans.phases.find((phase) => phase.current) ?? plans.phases.find((phase) => phase.id === state.phaseId);
+  const status = statusLabel(state.status);
+  const accent = toneColor(theme, "accent");
+  const { stations, shown } = phaseStations(roadmap, compact ? 7 : 16);
+  const stages = phaseStages(planPhase, compact);
+  const summaries = planPhase?.entries.filter((entry) => entry.summaryObserved).length ?? 0;
+  const planTotal = Math.max(planPhase?.declaredPlans ?? 0, planPhase?.entries.length ?? 0);
+  const ahead = roadmap.totalPhases - roadmap.completedPhases - (current && !current.completed ? 1 : 0);
+  return <View style={{ borderRadius: 20, padding: compact ? 18 : 26, gap: 20, overflow: "hidden", backgroundColor: tint(theme, accent, 0.1) }}>
+    <View style={{ position: "absolute", right: -120, top: -160, width: 420, height: 420, borderRadius: 210, backgroundColor: tint(theme, accent, 0.05) }} />
+    <View style={{ position: "absolute", right: -40, top: -90, width: 220, height: 220, borderRadius: 110, backgroundColor: tint(theme, accent, 0.05) }} />
+    <View style={{ flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "flex-start" : "center", gap: 10 }}>
+      <Text style={{ ...kicker(theme), color: accent }}>{[state.milestone ?? "Milestone", state.milestoneName, position ? `phase ${position} of ${roadmap.phases.length}` : null].filter(Boolean).join("  ·  ")}</Text>
+      <AgentChip agent={agent} theme={theme} />
     </View>
-    <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 6 }}><Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{planCountLabel(phase)}</Text><Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{phaseStatus(phase)}</Text></View>
-    {!showTable && phase.percent !== null && <ProgressMeter percent={phase.percent} label={`Phase ${phase.id}: ${planCountLabel(phase)}, ${phase.percent}%`} theme={theme} />}
+    <View style={{ gap: 8 }}>
+      <Text role="heading" numberOfLines={2} style={{ ...text(theme, compact ? 24 : 30, "700"), letterSpacing: -0.5 }}>{state.phaseId ? `Phase ${state.phaseId}` : "Phase not recorded"}{state.phaseName ? ` · ${state.phaseName}` : ""}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        <Pill theme={theme} tone={statusTone(status)} label={status} strong />
+        {state.plan && <Text numberOfLines={1} style={{ ...text(theme, 13, "400", true), flexShrink: 1 }}>Plan: {state.plan}</Text>}
+      </View>
+    </View>
+    {roadmap.availability === "available" && stations.length > 0 && <View style={{ gap: 6 }}>
+      <Text style={kicker(theme)}>Milestone phases{shown < roadmap.phases.length ? ` · ${shown} of ${roadmap.phases.length}` : ""}</Text>
+      <StationTrack theme={theme} compact={compact} stations={stations} label={`Phases. ${roadmap.phases.map((phase) => `${phase.id}: ${phaseStatus(phase).toLowerCase()}`).join("; ")}`} />
+    </View>}
+    {planPhase && <View style={{ gap: 6 }}>
+      <Text style={kicker(theme)}>Phase {planPhase.id} so far</Text>
+      <StationTrack theme={theme} compact={compact} stations={stages} label={stagesLabel(planPhase, stages)} />
+    </View>}
+    {roadmap.availability === "available" && roadmap.totalPhases > 0 && <View style={{ flexDirection: compact ? "column" : "row", gap: compact ? 12 : 24, alignItems: compact ? "stretch" : "center" }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
+        <Text style={{ ...text(theme, 44, "700"), ...figures, letterSpacing: -1, lineHeight: 50 }}>{roadmap.percent === null ? "—" : `${roadmap.percent}%`}</Text>
+        <Text style={text(theme, 13, "400", true)}>{`${roadmap.completedPhases} of ${plural(roadmap.totalPhases, "phase")}\nmarked complete`}</Text>
+      </View>
+      <View style={{ flex: 1, gap: 10, minWidth: 0 }}>
+        {roadmap.percent !== null && <SegmentBar theme={theme} height={12} label={`${plural(roadmap.completedPhases, "phase")} marked complete, ${current && !current.completed ? "1 current, " : ""}${ahead} ahead`} segments={[
+          { label: "complete", value: roadmap.completedPhases, color: toneColor(theme, "success") },
+          { label: "current", value: current && !current.completed ? 1 : 0, color: theme.colors.foreground },
+          { label: "ahead", value: ahead, color: tint(theme, theme.colors.foregroundMuted, 0.3) },
+        ]} />}
+        {roadmap.percent !== null && <Legend theme={theme} items={[
+          { color: toneColor(theme, "success"), label: `${roadmap.completedPhases} complete` },
+          ...(current && !current.completed ? [{ color: theme.colors.foreground, label: `phase ${current.id} current` }] : []),
+          ...(ahead > 0 ? [{ color: tint(theme, theme.colors.foregroundMuted, 0.3), label: `${ahead} ahead` }] : []),
+        ]} />}
+        {planPhase && planTotal > 0 && <Text style={{ ...text(theme, 12, "400", true), ...figures }}>Phase {planPhase.id}: {summaries} of {plural(planTotal, "plan")} with a summary{planPhase.declaredPlans === null ? " · total not confirmed" : ""}</Text>}
+      </View>
+    </View>}
   </View>;
+}
+
+function Figures({ overview, theme }: ThemeProps & { overview: BoardOverview }) {
+  const { requirements, roadmap, plans, todos, debug } = overview;
+  const debugPartial = !debug.countsComplete || debug.counts.unavailable > 0;
+  const least = (value: number, partial: boolean) => partial ? `At least ${value}` : String(value);
+  return <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+    <Stat theme={theme} label="Requirements" value={requirements.availability === "available" ? `${requirements.completed}/${requirements.total}` : "—"} detail={requirements.availability !== "available" ? "Not shown" : !requirements.total ? "None declared" : requirements.percent === null ? "Percentage withheld" : `${requirements.percent}% marked complete`} />
+    <Stat theme={theme} label="Phases" value={roadmap.availability === "available" ? `${roadmap.completedPhases}/${roadmap.totalPhases}` : "—"} detail={roadmap.percent === null ? null : `${roadmap.percent}% marked complete`} />
+    <Stat theme={theme} label="Plan summaries" value={plans.availability === "available" ? String(plans.observedSummaries) : "—"} detail={plans.availability === "available" ? `of ${plural(plans.observedPlans, "plan file")} observed` : null} />
+    <Stat theme={theme} label="TODOs" size={todos.countsComplete ? 26 : 20} value={todos.availability === "available" ? least(todos.counts.pending, !todos.countsComplete) : "—"} detail={todos.availability === "available" ? `pending · ${todos.counts.backlog + todos.counts.deferred} in backlog` : null} />
+    <Stat theme={theme} label="Debug" size={debugPartial ? 20 : 26} value={debug.availability === "available" ? least(debug.counts.unresolved, debugPartial) : "—"} detail={debug.availability === "available" ? `not resolved · ${debugPartial ? "at least " : ""}${plural(debug.counts.active + debug.counts.archived, "session file")}` : null} tone={debug.counts.unresolved ? "warning" : undefined} />
+  </View>;
+}
+
+function Latest({ state, theme }: ThemeProps & { state: BoardOverview["state"] }) {
+  return <Section title="Latest" overline="STATE.md" aside={state.updatedAt ? <RelativeTime theme={theme} value={state.updatedAt} prefix="updated " /> : undefined} theme={theme}>
+    {state.availability === "available" ? <>
+      <View style={{ flexDirection: "row", gap: 12 }}>
+        <View style={{ width: 3, borderRadius: 2, backgroundColor: toneColor(theme, "accent") }} />
+        <Text style={{ ...text(theme, 14), flex: 1 }}>{state.lastActivity ?? "No activity recorded."}</Text>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {state.milestone && <Pill theme={theme} label={`Milestone · ${state.milestone}`} />}
+        <Pill theme={theme} label={`Status · ${statusLabel(state.status)}`} />
+      </View>
+    </> : <Text style={text(theme, 13, "400", true)}>No readable project state was found. Roadmap progress can still be shown independently.</Text>}
+  </Section>;
+}
+
+function Requirements({ requirements, theme }: ThemeProps & { requirements: BoardOverview["requirements"] }) {
+  return <Section title="Requirements" overline="REQUIREMENTS.md" theme={theme}>
+    {requirements.availability !== "available" ? <Text style={text(theme, 13, "400", true)}>No readable current-milestone requirements checklist was found.</Text>
+      : requirements.total === 0 ? <Text style={text(theme, 13, "400", true)}>No requirements declared for this milestone.</Text> : <>
+        {requirements.percent !== null && <SegmentBar theme={theme} height={10} label={`${requirements.completed} of ${requirements.total} requirements marked complete`} segments={[
+          { label: "complete", value: requirements.completed, color: toneColor(theme, "success") }, { label: "pending", value: requirements.total - requirements.completed, color: tint(theme, theme.colors.foregroundMuted, 0.3) },
+        ]} />}
+        <Text style={{ ...text(theme, 13, "400", true), ...figures }}>{requirements.percent === null ? "Percentage withheld · " : ""}{requirements.completed} of {requirements.total} marked complete · {requirements.total - requirements.completed} pending · {requirements.mapped === null ? "phase mapping unavailable" : `${requirements.mapped} of ${requirements.total} mapped to phases`}</Text>
+      </>}
+  </Section>;
 }
 
 function RoadmapTable({ phases, theme }: ThemeProps & { phases: readonly OverviewPhase[] }) {
@@ -100,46 +220,47 @@ function RoadmapTable({ phases, theme }: ThemeProps & { phases: readonly Overvie
   const widths = [210, 150, 120, 80];
   return <ScrollView horizontal nestedScrollEnabled style={{ flexGrow: 0 }}>
     <View role="table" accessibilityLabel="Roadmap progress data table" style={{ minWidth: 560, gap: 2 }}>
-      <View role="row" style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
-        {columns.map((column, index) => <Text key={column} role="columnheader" style={{ ...textStyle(theme, true), fontSize: 12, fontWeight: "600", width: widths[index] }}>{column}</Text>)}
+      <View role="row" style={{ flexDirection: "row", paddingVertical: 8, borderBottomWidth: 1, borderColor: line(theme) }}>
+        {columns.map((column, index) => <Text key={column} role="columnheader" style={{ ...text(theme, 12, "600", true), width: widths[index] }}>{column}</Text>)}
       </View>
-      {phases.map((phase) => <View key={phase.id} role="row" style={{ flexDirection: "row", paddingVertical: 9, borderBottomWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
-        {[`${phase.id} · ${phase.title}`, planCountLabel(phase), phaseStatus(phase), phase.percent === null ? "—" : `${phase.percent}%`].map((value, index) => <Text key={index} role={index === 0 ? "rowheader" : "cell"} style={{ ...textStyle(theme, index !== 0), fontSize: 12, width: widths[index], paddingRight: 12 }}>{value}</Text>)}
+      {phases.map((phase) => <View key={phase.id} role="row" style={{ flexDirection: "row", paddingVertical: 9, borderBottomWidth: 1, borderColor: line(theme) }}>
+        {[`${phase.id} · ${phase.title}`, planCountLabel(phase), phaseStatus(phase), phase.percent === null ? "—" : `${phase.percent}%`].map((value, index) => <Text key={index} role={index === 0 ? "rowheader" : "cell"} style={{ ...text(theme, 12, "400", index !== 0), width: widths[index], paddingRight: 12 }}>{value}</Text>)}
       </View>)}
     </View>
   </ScrollView>;
 }
 
-function RoadmapCard({ roadmap, showTable, onToggleTable, theme, compact }: ThemeProps & { roadmap: BoardOverview["roadmap"] | undefined; showTable: boolean; onToggleTable(): void; compact: boolean }) {
-  const action = <Pressable accessibilityRole="button" accessibilityLabel={showTable ? "Show progress bars" : "Show progress as a data table"} accessibilityState={{ selected: showTable }} onPress={onToggleTable} style={{ minHeight: 44, paddingHorizontal: 10, justifyContent: "center", borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, borderRadius: 7 }}><Text style={{ ...textStyle(theme), fontSize: 12 }}>{showTable ? "Chart view" : "Table view"}</Text></Pressable>;
-  const current = roadmap?.phases.find((phase) => phase.current);
-  return Card({ title: "Roadmap Progress", source: "ROADMAP.md", action: roadmap?.phases.length ? action : undefined, theme, compact, children: roadmap?.availability === "available" ? <>
-    <View style={{ gap: 4 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 }}><Text style={{ ...textStyle(theme, true), flex: 1 }}>{roadmap.completedPhases} of {roadmap.totalPhases} phases complete</Text><Text style={{ ...textStyle(theme), fontSize: 30, lineHeight: 36, fontWeight: "600" }}>{roadmap.percent === null ? "—" : `${roadmap.percent}%`}</Text></View>
-      {!showTable && roadmap.percent !== null && <ProgressMeter large percent={roadmap.percent} label={`${roadmap.completedPhases} of ${roadmap.totalPhases} phases marked complete, ${roadmap.percent}%`} theme={theme} />}
-      <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Based on phase checkboxes, not a verification verdict.</Text>
+function PhaseRow({ phase, theme }: ThemeProps & { phase: OverviewPhase }) {
+  const color = phase.completed ? toneColor(theme, "success") : phase.current ? toneColor(theme, "accent") : theme.colors.foregroundMuted;
+  return <View role="listitem" style={{ gap: 3, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: phase.current ? tint(theme, toneColor(theme, "accent"), 0.1) : "transparent" }}>
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+      <Text style={{ ...text(theme, 13, phase.current ? "600" : "400"), flex: 1, minWidth: 0 }}><Text style={{ ...text(theme, 13, "700"), color }}>{phase.completed ? "✓" : phase.current ? "●" : "○"}  {phase.id}</Text>  {phase.title}</Text>
+      <Text style={{ ...text(theme, 13, "600"), ...figures }}>{phase.percent === null ? "—" : `${phase.percent}%`}</Text>
     </View>
-    {current && <Text style={{ ...textStyle(theme), fontSize: 12, fontWeight: "500" }}>Current phase · {current.id}</Text>}
-    {roadmap.phases.length ? showTable ? <RoadmapTable phases={roadmap.phases} theme={theme} /> : <View role="list" accessibilityLabel="Phase plan progress" style={{ gap: 3, marginHorizontal: -12 }}>{roadmap.phases.map((phase) => PhaseRow({ phase, showTable, theme }))}</View> : <Text style={textStyle(theme, true)}>No phases are listed in this roadmap.</Text>}
-    {roadmap.phases.length > 0 && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Each phase shows its declared plan progress. TBD totals are not treated as zero or included in an overall plan percentage.</Text>}
-  </> : <View style={{ gap: 6 }}><Text style={textStyle(theme)}>Roadmap unavailable</Text><Text style={textStyle(theme, true)}>No readable phase checklist was found. State remains available independently.</Text></View> });
+    <Text style={{ ...text(theme, 12, "400", true), ...figures }}>{planCountLabel(phase)} · {phaseStatus(phase)}</Text>
+    {phase.percent !== null && !phase.completed && <ProgressMeter percent={phase.percent} label={`Phase ${phase.id}: ${planCountLabel(phase)}, ${phase.percent}%`} theme={theme} />}
+  </View>;
 }
 
-function RequirementsCard({ requirements, theme, compact }: ThemeProps & { requirements: BoardOverview["requirements"] | undefined; compact: boolean }) {
-  return Card({ title: "Requirements", source: "REQUIREMENTS.md", theme, compact, children: requirements?.availability === "available" ? <>
-    <View style={{ gap: 8 }}>
-      <Text style={{ ...textStyle(theme), fontSize: 20, fontWeight: "600" }}>{requirements.total} requirements</Text>
-      {requirements.total === 0 ? <Text style={textStyle(theme, true)}>No requirements declared for this milestone.</Text> : <>
-        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <Text style={{ ...textStyle(theme, true), flex: 1 }}>{requirements.completed} of {requirements.total} marked complete</Text>
-          <Text style={{ ...textStyle(theme), fontWeight: "600" }}>{requirements.percent === null ? "—" : `${requirements.percent}%`}</Text>
-        </View>
-        {requirements.percent !== null && <ProgressMeter percent={requirements.percent} label={`${requirements.completed} of ${requirements.total} requirements marked complete, ${requirements.percent}%`} theme={theme} />}
-        <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{requirements.total - requirements.completed} pending · {requirements.mapped === null ? "Phase mapping unavailable" : `${requirements.mapped} of ${requirements.total} mapped to phases`}</Text>
-      </>}
-    </View>
-    <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Checklist status only; not independent verification of product behavior.</Text>
-  </> : <View style={{ gap: 6 }}><Text style={textStyle(theme)}>Requirements unavailable</Text><Text style={textStyle(theme, true)}>No readable current-milestone requirements checklist was found.</Text></View> });
+/** The roadmap as rows; a long opening run of completed phases folds behind one line, since the hero already shows them. */
+function PhaseList({ phases, theme }: ThemeProps & { phases: readonly OverviewPhase[] }) {
+  const [open, setOpen] = useState(false);
+  const lead = phases.findIndex((phase) => !phase.completed);
+  const folded = (lead === -1 ? phases.length : lead) >= 4 && !open ? (lead === -1 ? phases.length : lead) : 0;
+  return <View role="list" accessibilityLabel="Phase plan progress" style={{ gap: 2, marginHorizontal: -12 }}>
+    {folded > 0 && <Pressable accessibilityRole="button" accessibilityLabel={`Show ${plural(folded, "completed phase")}`} accessibilityState={{ expanded: false }} onPress={() => setOpen(true)} style={{ minHeight: 36, justifyContent: "center", paddingHorizontal: 12 }}>
+      <Text style={text(theme, 13, "400", true)}><Text style={{ ...text(theme, 13, "700"), color: toneColor(theme, "success") }}>✓</Text>  {phases[0].id}–{phases[folded - 1].id} · {plural(folded, "phase")} complete  ▸</Text>
+    </Pressable>}
+    {phases.slice(folded).map((phase) => <PhaseRow key={phase.id} phase={phase} theme={theme} />)}
+  </View>;
+}
+
+function Roadmap({ roadmap, showTable, onToggleTable, theme }: ThemeProps & { roadmap: BoardOverview["roadmap"]; showTable: boolean; onToggleTable(): void }) {
+  return <Section title="Roadmap" overline="ROADMAP.md" theme={theme} aside={roadmap.phases.length ? <Toggle<"chart" | "table"> theme={theme} label="Show the roadmap as" value={showTable ? "table" : "chart"} onChange={(value) => { if ((value === "table") !== showTable) onToggleTable(); }} options={[{ value: "chart", label: "Chart" }, { value: "table", label: "Table" }]} /> : undefined}>
+    {roadmap.availability !== "available" ? <Text style={text(theme, 13, "400", true)}>No readable phase checklist was found. State remains available independently.</Text>
+      : !roadmap.phases.length ? <Text style={text(theme, 13, "400", true)}>No phases are listed in this roadmap.</Text>
+      : showTable ? <RoadmapTable phases={roadmap.phases} theme={theme} /> : <PhaseList phases={roadmap.phases} theme={theme} />}
+  </Section>;
 }
 
 const warningCopy: Record<BoardOverview["warnings"][number], string> = {
@@ -157,37 +278,40 @@ const warningCopy: Record<BoardOverview["warnings"][number], string> = {
   "requirements-limited": "The requirements file exceeded the safe observation limits.",
 };
 
-export function OverviewView({ state, onRefresh, theme, compact = false, showTable = false, onToggleTable = () => undefined }: {
+/** What qualifies the overview: the evidence warnings, in the board's words. */
+export const coreOverviewAlerts = (overview: BoardOverview | undefined) => (overview?.warnings ?? []).map((warning) => warningCopy[warning]);
+
+/** The caveats behind the overview, folded under "About these figures". */
+export function coreOverviewNotes(): string[] {
+  return [
+    "Recorded planning state, not live execution status. Phase stages come from the files each stage leaves; an observed file is not a passed gate.",
+    "Phase progress is based on roadmap checkboxes, not a verification verdict. Each phase shows its declared plan progress; TBD totals are not treated as zero.",
+    "Requirements show checklist status only, not independent verification of product behavior.",
+    "The agent status is Paseo's live state for this workspace; it is not read from the project files.",
+  ];
+}
+
+export function OverviewView({ state, onRefresh, theme, compact = false, showTable = false, onToggleTable = () => undefined, agent = null, onNavigate = () => undefined }: {
   state: BoardViewState;
   onRefresh(): void;
   theme: BoardTheme;
   compact?: boolean;
   showTable?: boolean;
   onToggleTable?(): void;
+  agent?: WorkspaceAgent;
+  onNavigate?(tab: BoardTab): void;
 }) {
   const overview = state.snapshot?.overview;
-  const hasSnapshot = Boolean(state.snapshot);
-  return <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: compact ? 16 : 24, gap: 20, paddingBottom: 32 }} nestedScrollEnabled>
-    <View style={{ flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "stretch" : "center", gap: 14 }}>
-      <View style={{ gap: 4, flex: 1, minWidth: 0 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 24, lineHeight: 30, fontWeight: "600" }}>Project overview</Text><Text style={textStyle(theme, true)}>State, roadmap progress, and requirements for the selected workspace.</Text></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={state.busy ? "Refreshing overview" : "Refresh overview"} accessibilityState={{ disabled: state.busy, busy: state.busy }} disabled={state.busy} onPress={onRefresh} style={{ minHeight: 44, alignSelf: compact ? "flex-start" : "auto", justifyContent: "center", paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}><Text style={{ ...textStyle(theme), fontWeight: "500" }}>{state.busy ? "Refreshing…" : "Refresh"}</Text></Pressable>
-    </View>
-    {state.busy && !hasSnapshot ? <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>Loading project overview…</Text> : <>
-      {state.error && <Text role="alert" style={textStyle(theme)}>Could not refresh the overview. {hasSnapshot ? "The last snapshot is still displayed." : "Try refreshing again."}</Text>}
-      {(state.snapshot?.freshness === "stale" || state.snapshot?.freshness === "refresh-failed") && <Text style={textStyle(theme, true)}>Planning files may have changed. Refresh to update these cards.</Text>}
-      {state.refreshAnnouncement && <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>{state.refreshAnnouncement}</Text>}
-      <View style={{ flexDirection: compact ? "column" : "row", alignItems: "stretch", gap: 20 }}>
-        <View style={{ flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" : 0, minWidth: 0, gap: 20 }}>
-          {StateCard({ state: overview?.state, theme, compact: true })}
-          {!compact && RequirementsCard({ requirements: overview?.requirements, theme, compact: true })}
-        </View>
-        <View style={{ flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" : 0, minWidth: 0 }}>
-          {RoadmapCard({ roadmap: overview?.roadmap, showTable, onToggleTable, theme, compact: true })}
-        </View>
-        {compact && RequirementsCard({ requirements: overview?.requirements, theme, compact: true })}
-      </View>
-      {overview && overview.warnings.length > 0 && <View style={{ gap: 4 }}>{overview.warnings.map((warning) => <Text key={warning} style={{ ...textStyle(theme, true), fontSize: 12 }}>{warningCopy[warning]}</Text>)}</View>}
-      <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Last refresh: {dateLabel(state.snapshot?.observedAt ?? null)}</Text>
+  const column = { flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" as const : 0, minWidth: 0, gap: 16 };
+  return <BoardFrame title="Overview" description="Where this milestone stands, what needs you, and how far each phase has come." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={coreOverviewAlerts(overview)} notes={coreOverviewNotes()}>
+    {!overview ? <Section theme={theme} title="Project evidence unavailable"><Text style={text(theme, 13, "400", true)}>No readable planning state was found for this workspace.</Text></Section> : <>
+      <FadeIn><Hero overview={overview} agent={agent} theme={theme} compact={compact} /></FadeIn>
+      <FadeIn delay={80}><Needs needs={coreNeeds(overview, agent)} calm="No UAT issue, verification gap, validation escalation or open debug session is recorded, and no agent is waiting for input." theme={theme} onNavigate={onNavigate} /></FadeIn>
+      <FadeIn delay={140}><Figures overview={overview} theme={theme} /></FadeIn>
+      <FadeIn delay={200}><View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "flex-start", gap: 16 }}>
+        <View style={column}><Latest state={overview.state} theme={theme} /><Requirements requirements={overview.requirements} theme={theme} /></View>
+        <View style={column}><Roadmap roadmap={overview.roadmap} showTable={showTable} onToggleTable={onToggleTable} theme={theme} /></View>
+      </View></FadeIn>
     </>}
-  </ScrollView>;
+  </BoardFrame>;
 }

@@ -4,7 +4,8 @@ import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import type { BoardPath, PathTask } from "../shared/path.js";
 import { ACTIVITY_BUCKET_MS, type UsageActivity, type UsageTask } from "../shared/usage.js";
 import type { BoardViewState } from "./board-components.js";
-import { PathFrame, plural, SetupNotice, statusColor, tokenLabel, type ThemeProps } from "./path-components.js";
+import { BoardFrame, plural, tokenLabel, type ThemeProps } from "./board-frame.js";
+import { SetupNotice, statusColor } from "./path-components.js";
 import { usageAlerts, usageNotice } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { duration, integer, money } from "./usage-format.js";
@@ -289,7 +290,7 @@ export function PathTimelineView({ state, usage, onRefresh, theme, compact = fal
   const pole = longPole(value?.tasks ?? []);
   const active = scale ? scale.segments.reduce((sum, segment) => sum + segment.end - segment.start, 0) : 0;
   const notice = usageNotice(usage);
-  return <PathFrame title="Timeline" description="A flight recorder of this workspace: every host turn on one time axis, one lane per task agent." subject="timeline" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={timelineAlerts(usage)} notes={timelineNotes()}>
+  return <BoardFrame title="Timeline" description="A flight recorder of this workspace: every host turn on one time axis, one lane per task agent." subject="timeline" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={timelineAlerts(usage)} notes={timelineNotes()}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : !scale ? <Section theme={theme} title="No activity to draw">
       <Text style={text(theme, 13, "400", true)}>{notice ?? "No host turn in this workspace has a timestamp yet."}</Text>
     </Section> : <>
@@ -319,5 +320,5 @@ export function PathTimelineView({ state, usage, onRefresh, theme, compact = fal
       </View>
       <Heatmap activity={activity} theme={theme} compact={compact} />
     </>}
-  </PathFrame>;
+  </BoardFrame>;
 }

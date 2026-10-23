@@ -195,7 +195,7 @@ export function Toggle<V extends string>({ label, options, value, onChange, them
   return <View role="radiogroup" accessibilityLabel={label} style={{ flexDirection: "row", padding: 3, gap: 2, borderRadius: 10, backgroundColor: surface(theme, 2), alignSelf: "flex-start" }}>
     {options.map((option) => {
       const selected = option.value === value;
-      return <Pressable key={option.value} accessibilityRole="radio" accessibilityLabel={option.label} accessibilityState={{ selected }} onPress={() => onChange(option.value)} style={{ minHeight: 30, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8, backgroundColor: selected ? theme.colors.surface0 : "transparent" }}>
+      return <Pressable key={option.value} accessibilityRole="radio" accessibilityLabel={option.label} accessibilityState={{ selected, checked: selected }} {...(Platform.OS === "web" ? { "aria-checked": selected } : {})} onPress={() => onChange(option.value)} style={{ minHeight: 30, justifyContent: "center", paddingHorizontal: 12, borderRadius: 8, backgroundColor: selected ? theme.colors.surface0 : "transparent" }}>
         <Text style={text(theme, 12, selected ? "600" : "400", !selected)}>{option.label}</Text>
       </Pressable>;
     })}
@@ -221,6 +221,13 @@ export function ago(value: string | null | undefined, now = Date.now()): string 
   return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
+/** A recorded timestamp in UTC, the way the state file writes it: "Oct 22, 02:05 PM UTC". */
+export function dateLabel(value: string | null): string {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" });
+}
+
 /** "Oct 22" for a recorded date, in UTC so a date never shifts a day. */
 export const shortDate = (date: string | null | undefined) => {
   if (!date) return "—";
@@ -239,4 +246,37 @@ export const clockTime = (time: string | number | null | undefined) => {
 export function RelativeTime({ value, theme, prefix = "", style }: ThemeProps & { value: string | null | undefined; prefix?: string; style?: object }) {
   const now = useNow(10_000);
   return <Text style={style ?? text(theme, 12, "400", true)}>{prefix}{ago(value, now)}</Text>;
+}
+
+export type TrackStation = { key: string; label: string; detail: string | null; state: "done" | "skipped" | "current" | "future"; tone?: Tone };
+
+/**
+ * Stations on a line: done ones filled, the current one ringed (breathing while `moving`), skipped ones dashed, the rest hollow.
+ * The line is solid up to the current station. `label` describes the whole track to assistive technology.
+ */
+export function StationTrack({ stations, label, currentTone = "accent", moving = true, theme, compact }: ThemeProps & { stations: readonly TrackStation[]; label: string; currentTone?: Tone; moving?: boolean; compact: boolean }) {
+  const done = toneColor(theme, "success");
+  // Not the border token: the track sits on tinted panels, where the border color all but disappears.
+  const ahead = tint(theme, theme.colors.foregroundMuted, 0.35);
+  const reached = (station: TrackStation) => station.state !== "future";
+  const segment = (left: TrackStation | undefined, right: TrackStation | undefined) => left && right && reached(left) && reached(right) ? tint(theme, done, 0.55) : ahead;
+  return <View accessible accessibilityRole="image" accessibilityLabel={label} style={{ flexDirection: "row" }}>
+    {stations.map((station, index) => {
+      const current = station.state === "current";
+      const size = current ? 16 : station.state === "skipped" ? 8 : 11;
+      const color = station.tone ? toneColor(theme, station.tone) : current ? toneColor(theme, currentTone) : station.state === "done" ? done : "transparent";
+      const hollow = station.state === "future" || station.state === "skipped";
+      return <View key={station.key} style={{ flex: 1, minWidth: 0, alignItems: "center", gap: 6 }}>
+        <View style={{ height: 30, alignSelf: "stretch", flexDirection: "row", alignItems: "center" }}>
+          <View style={{ flex: 1, height: 2, backgroundColor: index ? segment(stations[index - 1], station) : "transparent" }} />
+          <View style={{ width: 30, height: 30, alignItems: "center", justifyContent: "center" }}>
+            {current && moving ? <Pulse color={color} size={size} /> : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: hollow && !station.tone ? "transparent" : color, borderWidth: hollow ? 2 : 0, borderColor: station.tone && hollow ? color : ahead, borderStyle: station.state === "skipped" ? "dashed" : "solid" }} />}
+          </View>
+          <View style={{ flex: 1, height: 2, backgroundColor: index < stations.length - 1 ? segment(station, stations[index + 1]) : "transparent" }} />
+        </View>
+        <Text numberOfLines={1} style={{ ...text(theme, compact ? 11 : 12, current ? "700" : "500", !current && station.state !== "done"), ...(current ? { color: toneColor(theme, currentTone) } : {}) }}>{station.label}</Text>
+        <Text numberOfLines={1} style={{ ...text(theme, 11, "400", true), ...figures, marginTop: -6 }}>{station.detail ?? " "}</Text>
+      </View>;
+    })}
+  </View>;
 }

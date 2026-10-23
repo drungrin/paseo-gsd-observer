@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("react-native", () => ({ View: "View", Text: "Text", Pressable: "Pressable", Platform: { OS: "web" } }));
+vi.mock("react-native", async () => (await import("../helpers/react-native-mock")).reactNativeMock);
 vi.mock("@getpaseo/plugin/client/react-native", () => ({ ScrollView: "PaseoScrollView" }));
 vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return { ...original, useState: vi.fn((value: unknown) => [value, vi.fn()]) };
+  const hooks = (await import("../helpers/react-native-mock")).reactHooksMock(await importOriginal<typeof import("react")>());
+  return { ...hooks, useState: vi.fn(hooks.useState) };
 });
 
 import { useState } from "react";
-import { DebugView, matchingSessions, SessionDetails, SessionRow } from "../../client/debug-components";
+import { expand } from "../helpers/react-native-mock";
+import { debugNotes, DebugView, matchingSessions, SessionDetails, SessionRow } from "../../client/debug-components";
 import type { BoardViewState } from "../../client/board-components";
+import { liveStatus } from "../../client/board-frame";
 import type { BoardDebug, DebugSession } from "../../shared/debug";
 import type { BoardOverview } from "../../shared/overview";
 
@@ -38,51 +40,40 @@ const state = (debug: BoardDebug = data()): BoardViewState => ({ workspaceId: "s
   overview: { debug } as BoardOverview,
 } });
 type Node = { type?: unknown; props?: Record<string, unknown> };
-const nodes = (node: unknown): Node[] => {
-  if (Array.isArray(node)) return node.flatMap(nodes);
-  if (!node || typeof node !== "object") return [];
-  const value = node as Node;
-  return [value, ...nodes(value.props?.children)];
-};
-const text = (node: unknown): string => {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(text).join("");
-  if (!node || typeof node !== "object") return "";
-  return text((node as Node).props?.children);
-};
-const expand = (node: unknown): unknown => {
-  if (Array.isArray(node)) return node.map(expand);
-  if (!node || typeof node !== "object") return node;
-  const value = node as Node;
-  if (typeof value.type === "function") return expand((value.type as (props: Record<string, unknown>) => unknown)(value.props ?? {}));
-  return { ...value, props: { ...value.props, children: expand(value.props?.children) } };
-};
+const nodes = (node: unknown): Node[] => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === "object" ? [node as Node, ...nodes((node as Node).props?.children)] : [];
+const text = (node: unknown): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" ? text((node as Node).props?.children) : "";
+/** The headline figures, without the status bar that also carries an accessible label. */
+const facts = (tree: unknown) => nodes(tree).filter((node) => node.props?.accessible && node.props?.accessibilityRole !== "image").map((node) => node.props?.accessibilityLabel);
+const bar = (tree: unknown) => nodes(tree).find((node) => node.props?.accessible && node.props?.accessibilityRole === "image");
+/** Session row toggles; the folded "About these figures" notes are a disclosure too, but not a session. */
+const sessionRows = (tree: unknown) => nodes(tree).filter((node) => (node.props?.accessibilityState as { expanded?: boolean } | undefined)?.expanded !== undefined && node.props?.accessibilityLabel !== "About these figures");
 const view = (debug?: BoardDebug, compact = false) => expand(DebugView({ state: state(debug), theme, compact, onRefresh: vi.fn() }));
 
 describe("Debug tab", () => {
   it("opens on sessions that need attention with recorded statuses, locations and collapsed rows", () => {
     const tree = view();
     const content = text(tree);
-    expect(content).toContain("GSD debug sessions in the active debug directory and its resolved archive.");
-    expect(content).toContain("statuses are as recorded in each file, not re-verified.");
+    expect(debugNotes()[0]).toContain("GSD debug sessions in the active debug directory and its resolved archive.");
+    expect(debugNotes()[0]).toContain("statuses are as recorded in each file, not re-verified.");
     expect(content).toContain("5 session files found (3 active, 2 archived) · 5 safe rows shown. Recorded statuses, not live checks.");
     expect(content).toContain("The debug knowledge base is not a session and is not listed.");
     expect(content).toContain("4 sessions match the current filters.");
     expect(content).not.toContain("perfil-externo-outro-setor");
     expect(content).toContain("Recorded: awaiting_human_verify · Active directory · Updated 2026-09-08");
     expect(content).toContain("Controlled intervention in dev");
-    expect(content).toContain("No recorded status");
-    expect(content).toContain("Needs reconciliation");
+    // The status pill sits beside the name; the reconciliation flag under the placement line.
+    expect(content).toContain("Controlled intervention in devNo recorded status");
+    expect(content).toContain("pool-driver-notfoundBlockedRecorded: blocked");
+    expect(content).toContain("calendario-estavel-por-contaDiagnosedRecorded: diagnosed · Resolved archive · Updated 2026-09-08Needs reconciliation");
     expect(content).not.toContain("Promote the fixed build");
-    const facts = nodes(tree).filter((node) => node.props?.accessible).map((node) => node.props?.accessibilityLabel);
-    expect(facts).toEqual(["Unresolved: 3", "Awaiting verification: 1", "Blocked: 1", "Unclassified: 1", "Resolved: 1", "Needs reconciliation: 1"]);
-    expect(content).toContain("Needs attention: not recorded as resolved, or recorded in a way that needs reconciliation.");
+    expect(facts(tree)).toEqual(["Unresolved: 3", "Awaiting verification: 1", "Blocked: 1", "Unclassified: 1", "Resolved: 1", "Needs reconciliation: 1"]);
+    expect(debugNotes()).toContain("Needs attention: not recorded as resolved, or recorded in a way that needs reconciliation.");
     const filters = nodes(tree).filter((node) => (node.props?.accessibilityLabel as string | undefined)?.startsWith("Filter:"));
     expect(filters.map((node) => node.props?.accessibilityLabel)).toEqual(["Filter: Needs attention", "Filter: All", "Filter: Unresolved", "Filter: Open", "Filter: Diagnosed", "Filter: Awaiting verification",
       "Filter: Blocked", "Filter: Resolved", "Filter: Needs reconciliation", "Filter: Unclassified", "Filter: Any location", "Filter: Active directory", "Filter: Resolved archive"]);
     expect(filters[0].props).toMatchObject({ accessibilityState: { selected: true }, "aria-pressed": true });
     expect(filters[10].props).toMatchObject({ accessibilityState: { selected: true }, "aria-pressed": true });
-    const rows = nodes(tree).filter((node) => (node.props?.accessibilityState as { expanded?: boolean } | undefined)?.expanded !== undefined);
+    const rows = sessionRows(tree);
     expect(rows.map((node) => node.props?.accessibilityLabel)).toEqual([
       "pool-driver-notfound. Blocked. Recorded: blocked. Active directory. Show details",
       "login-mobile-sessao-falha. Awaiting human verification. Recorded: awaiting_human_verify. Active directory. Show details",
@@ -91,6 +82,35 @@ describe("Debug tab", () => {
     ]);
     expect(rows[0].props).toMatchObject({ accessibilityRole: "button", "aria-expanded": false });
     expect(text(view(undefined, true))).toContain("pool-driver-notfound");
+  });
+
+  it("splits the status bar by recorded status and reads it out in words", () => {
+    const tree = view();
+    // Unresolved less awaiting verification and blocked is what remains open or diagnosed.
+    expect(bar(tree)?.props?.accessibilityLabel).toBe("1 open or diagnosed, 1 awaiting verification, 1 blocked, 1 unclassified, 1 resolved");
+    expect(text(tree)).toContain("1 open or diagnosed1 awaiting verification1 blocked1 unclassified1 resolved");
+    const resolved = { ...data(), sessions: [data().sessions[4]], counts: counts({ active: 0, archived: 1, attention: 0, unresolved: 0, diagnosed: 0, awaitingVerification: 0, blocked: 0, resolved: 1, unclassified: 0, reconciliation: 0, displayed: 1 }) };
+    const calm = view(resolved);
+    expect(bar(calm)?.props?.accessibilityLabel).toBe("0 open or diagnosed, 0 awaiting verification, 0 blocked, 0 unclassified, 1 resolved");
+    // The legend lists only statuses that have sessions.
+    expect(text(calm)).toContain("1 resolved");
+    expect(text(calm)).not.toContain("0 blocked");
+    const empty = { ...data(), sessions: [], counts: counts({ active: 0, archived: 0, unresolved: 0, diagnosed: 0, awaitingVerification: 0, blocked: 0, resolved: 0, unclassified: 0, reconciliation: 0, knowledgeBase: 0, displayed: 0 }) };
+    expect(bar(view(empty))).toBeUndefined();
+  });
+
+  it("keeps qualifiers visible and folds the reading notes", () => {
+    const element = DebugView({ state: state(), theme, onRefresh: vi.fn() }) as { props: { notes: string[]; alerts: string[] } };
+    expect(element.props.notes).toEqual(debugNotes());
+    expect(element.props.alerts).toEqual([]);
+    const partial = { ...data(), countsComplete: false, limited: true, counts: counts({ unavailable: 2, displayed: 4 }) };
+    expect(DebugView({ state: state(partial), theme, onRefresh: vi.fn() }).props.alerts).toEqual([
+      "The debug inventory or its safe excerpts are incomplete; counts cover only observed files.",
+      "2 debug files or directories could not be read, so sessions there may be missing and their status is unknown.",
+    ]);
+    const tree = view();
+    expect(nodes(tree).find((node) => node.props?.accessibilityLabel === "About these figures")?.props).toMatchObject({ accessibilityState: { expanded: false } });
+    expect(text(tree)).not.toContain("not re-verified");
   });
 
   it("filters by recorded status and location without reclassifying archived sessions", () => {
@@ -175,7 +195,10 @@ describe("Debug tab", () => {
     expect(halfReadText).toContain("No readable session needs attention; 1 debug file or directory could not be read, so sessions there may be missing and their status is unknown.");
     expect(halfReadText).toContain("2 session files found (1 active, 1 archived)");
     expect(halfReadText).not.toContain("Choose All");
-    expect(nodes(view(halfRead)).filter((node) => node.props?.accessible).map((node) => node.props?.accessibilityLabel)).toContain("Resolved: At least 1");
+    expect(facts(view(halfRead))).toEqual(["Unresolved: At least 0", "Awaiting verification: At least 0", "Blocked: At least 0", "Unclassified: At least 0", "Resolved: At least 1", "Needs reconciliation: At least 0"]);
+    // The bar and its legend are lower bounds too, like the figures above them.
+    expect(bar(view(halfRead))?.props?.accessibilityLabel).toBe("at least 0 open or diagnosed, at least 0 awaiting verification, at least 0 blocked, at least 0 unclassified, at least 1 resolved");
+    expect(halfReadText).toContain("at least 1 resolved");
     const partial = { ...data(), countsComplete: false, limited: true, archiveState: "absent" as const, counts: counts({ unavailable: 1, displayed: 4, notes: 2 }) };
     const partialText = text(view(partial));
     expect(partialText).toContain("The debug inventory or its safe excerpts are incomplete; counts cover only observed files.");
@@ -187,11 +210,14 @@ describe("Debug tab", () => {
     expect(partialText).toContain("No resolved archive directory was observed.");
     expect(partialText).toContain("; some files have no safe row.");
     const loading: BoardViewState = { workspaceId: "other", snapshot: null, busy: true, error: null };
-    expect(text(DebugView({ state: loading, theme, onRefresh: vi.fn() }))).toContain("Loading debug sessions…");
+    expect(text(expand(DebugView({ state: loading, theme, onRefresh: vi.fn() })))).toContain("Loading debug sessions…");
     const stale = state(); stale.snapshot!.freshness = "stale";
-    expect(text(expand(DebugView({ state: stale, theme, compact: true, onRefresh: vi.fn() })))).toContain("Refresh to update debug sessions.");
+    expect(liveStatus(stale).label).toBe("Files changed · updating");
+    expect(text(expand(DebugView({ state: stale, theme, compact: true, onRefresh: vi.fn() })))).toContain("Files changed · updating");
     const failed = { ...state(), error: "Could not refresh evidence." };
-    expect(text(expand(DebugView({ state: failed, theme, onRefresh: vi.fn() })))).toContain("Could not refresh debug sessions. The last snapshot is still displayed.");
+    const failedText = text(expand(DebugView({ state: failed, theme, onRefresh: vi.fn() })));
+    expect(failedText).toContain("Could not refresh debug sessions. The last snapshot is still displayed.");
+    expect(failedText).toContain("Out of date");
   });
 
   it("resets filters and expansion on a workspace change and ignores stale expanded ids", () => {

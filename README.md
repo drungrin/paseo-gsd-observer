@@ -12,15 +12,17 @@ The board is a set of read-only tabs over the selected workspace's current plann
 
 ### GSD Core workspaces
 
-- **Overview**: STATE, roadmap progress, and requirements.
-- **Plans**: current-milestone phases with their plans, summaries, and phase checks.
-- **Context**: decisions and boundaries recorded in each phase's CONTEXT.
-- **Validation**: per-phase validation maps and Nyquist status.
-- **Verification**: per-phase verification reports, truths, and human checks.
-- **UAT**: per-phase user acceptance tests and their recorded results.
-- **TODOs**: standalone TODO files across pending, backlog, and completed folders.
-- **Parking Lot**: unsequenced 999.x entries in the roadmap Backlog.
-- **Debug**: GSD debug sessions in the active debug directory and its resolved archive.
+- **Overview**: the current phase and milestone, the milestone's phases as a line of stations, the current phase's way through discuss, research, plan, execute and verify as the files each stage leaves show it, and milestone progress. Below is what needs you, one line per kind: UAT, verification and validation needing a look (the current phase marked), unresolved debug sessions and an agent waiting for input. Then the headline figures, the latest STATE activity, requirements, and the roadmap as rows or a table, with a long opening run of completed phases folded.
+- **Plans**: the milestone's plans as one bar (summary written, plan file only, declared without a plan file), a chip per phase, and the selected phase's stage track, its plan and execute sub-checks, and its plans as tiles wave by wave. Selecting a plan shows its roadmap, plan-file and summary evidence, objective and recorded summary. A list view shows the same plans with their facts.
+- **Context**: decisions and boundaries recorded in each phase's CONTEXT, with the number of decisions recorded and of the discretion, deferred and specific ideas shown.
+- **Validation**: per-phase validation maps with their status mix as a bar, Nyquist and Wave 0 status, and the latest audit.
+- **Verification**: per-phase verification reports with the score and each truth table as bars, gaps, and human checks.
+- **UAT**: per-phase user acceptance tests with their recorded results as a bar.
+- **TODOs**: standalone TODO files across pending, backlog, and completed folders, with the folder mix as a bar.
+- **Parking Lot**: unsequenced 999.x entries in the roadmap Backlog, with their dispositions as a bar.
+- **Debug**: GSD debug sessions in the active debug directory and its resolved archive, with their recorded statuses as a bar.
+
+Each phase chip carries a short status line and a mark when the phase's evidence needs a look. Tabs carry small badges: plan summaries written, phases needing a look in UAT, Verification and Validation, pending TODOs and unresolved debug sessions.
 
 | Plans | Context |
 | --- | --- |
@@ -42,7 +44,9 @@ The board is a set of read-only tabs over the selected workspace's current plann
 - **Questions**: discussion answers whose follow-up is still required and that no disposition or later answer has closed.
 - **Ledger**: host usage for the workspace (cost, turns, prompts, tokens, cache hit, agent time and a per-model table), then every host turn recorded inside it, newest first, with its agent, model, tokens, seconds and cost. Turns are loaded only when asked for, 200 at a time.
 
-Tabs carry small badges: tasks done, open review blocks, milestones shipped and pending questions. The notes behind each tab's figures are folded under **About these figures**. The overview also shows Paseo's live status for the workspace's agents, which comes from Paseo, not from the files.
+Tabs carry small badges: tasks done, open review blocks, milestones shipped and pending questions.
+
+In both pipelines the notes behind each tab's figures are folded under **About these figures**, and the overview shows Paseo's live status for the workspace's agents, which comes from Paseo, not from the files.
 
 Host usage comes from Claude Code and Codex session logs whose recorded working directory is inside the workspace, read and priced the way the GSD Path daemon reads and prices them, so both show the same figures. Usage dated on or before a milestone's ship date counts toward it; later usage counts toward the current milestone. Costs use the price table in the GSD Path daemon's configuration; without one, tokens are shown and costs are not. A task's spend and lane hold the turns of subagents (Claude Code sidechains and spawned Codex workers) whose log names that task first, so a reviewer reading a wave counts under its first task; sessions nobody spawned are the orchestrator.
 
@@ -50,7 +54,7 @@ A workspace uses GSD Path when `.project/STATE.md` names a `gsd-path/` pipeline,
 
 The board never runs the GSD Path runtime or Git, so it shows phase, status and shipping as recorded. It never claims a verified shipment, a published branch or the runtime's next action.
 
-Statuses are shown as recorded, and disagreements between sources are flagged rather than resolved. The board follows the files: when a watched file changes it reads the evidence again on its own, and a GSD Path tab says briefly what changed, such as a task that is now done or a new review cycle. Usage follows at most once a minute. Refresh reads everything again at once, and a GSD Path tab says when the board cannot follow changes.
+Statuses are shown as recorded, and disagreements between sources are flagged rather than resolved. The board follows the files: when a watched file changes it reads the evidence again on its own, and the tab says briefly what changed, such as a task that is now done, a new review cycle, a plan summary written or new UAT results. Usage follows at most once a minute. Refresh reads everything again at once, and every tab says when the board cannot follow changes.
 
 The board is an observer, not a control surface. It contains no terminal, agent, lifecycle, merge, cleanup, or write action.
 

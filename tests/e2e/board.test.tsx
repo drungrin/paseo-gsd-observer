@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm } from "node:fs/promises";
 import ts from "typescript";
 
 vi.mock("react-native", async () => (await import("../helpers/react-native-mock")).reactNativeMock);
@@ -172,7 +172,9 @@ describe("board tracer", () => {
   });
 
   it("keeps client and shared imports inside the read-only plugin boundary", async () => {
-    const files = ["index.client.tsx", "client/board-panel.tsx", "client/board-components.tsx", "client/board-state.ts", "client/path-components.tsx", "client/path-overview-components.tsx", "client/path-tasks-components.tsx", "client/path-reviews-components.tsx", "client/path-questions-components.tsx", "client/path-roadmap-components.tsx", "client/path-ledger-components.tsx", "client/path-usage-components.tsx", "client/usage-controller.ts", "client/usage-format.ts", "shared/usage.ts", "shared/board-rpc.ts", "shared/path.ts"];
+    // Every client module and the shared types it reads, so a new view cannot slip past the boundary.
+    const listed = async (directory: string) => (await readdir(directory)).filter((name) => /\.tsx?$/.test(name)).map((name) => `${directory}/${name}`);
+    const files = ["index.client.tsx", ...await listed("client"), ...await listed("shared")];
     const sources = await Promise.all(files.map(async (file) => ({ file, source: await readFile(file, "utf8") })));
     for (const { file, source } of sources) {
       const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2020, true, file.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);

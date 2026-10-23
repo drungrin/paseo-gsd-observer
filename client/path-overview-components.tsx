@@ -2,15 +2,14 @@ import { Pressable, Text, View } from "react-native";
 import type { BoardPath } from "../shared/path.js";
 import type { BoardViewState } from "./board-components.js";
 import type { BoardTab } from "./board-tabs.js";
-import { PathFrame, plural, SetupNotice, taskLegend, TaskBar, tokenLabel, warningAlerts, type ThemeProps } from "./path-components.js";
+import { AgentChip, BoardFrame, Needs, plural, tokenLabel, type Need, type ThemeProps, type WorkspaceAgent } from "./board-frame.js";
+import { SetupNotice, taskLegend, TaskBar, warningAlerts } from "./path-components.js";
 import { Heartbeat } from "./path-timeline-components.js";
 import { USAGE_SOURCE, usageAlerts, usageNotice } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { duration, integer, money, tokens } from "./usage-format.js";
-import { BarRow, FadeIn, figures, kicker, Legend, line, Pill, Pulse, RelativeTime, Section, SegmentBar, shortDate, Stat, surface, text, tint, toneColor, type Tone } from "./ui-kit.js";
+import { BarRow, FadeIn, figures, kicker, Legend, Pill, RelativeTime, Section, SegmentBar, shortDate, Stat, StationTrack, surface, text, tint, toneColor } from "./ui-kit.js";
 
-/** Paseo's live state for the workspace's agents, which the files cannot tell. */
-export type WorkspaceAgent = { status: "needs_input" | "failed" | "running" | "attention" | "done"; since: string | null } | null;
 
 /** The GSD Path v2 phases in pipeline order; inspect runs on existing code only, roadmap only in program flow, research and decide when questions are open. */
 export const PIPELINE = ["inspect", "define", "research", "decide", "roadmap", "plan", "build", "ship"] as const;
@@ -39,32 +38,12 @@ export function stationsFor(path: BoardPath): Station[] {
 export function PhaseTrack({ path, theme, compact }: ThemeProps & { path: BoardPath; compact: boolean }) {
   const stations = stationsFor(path);
   const status = path.state.status;
-  const currentTone: Tone = status === "blocked" ? "danger" : status === "done" ? "success" : "accent";
-  const done = toneColor(theme, "success");
-  const reached = (station: Station) => station.state !== "future";
-  const segment = (left: Station | undefined, right: Station | undefined) => left && right && reached(left) && reached(right) ? tint(theme, done, 0.55) : line(theme);
   const label = stations.map((station) => `${station.phase}: ${station.state === "done" ? `entered ${shortDate(station.since)}${station.visits > 1 ? `, ${station.visits} times` : ""}` : station.state === "current" ? `current${station.since ? ` since ${shortDate(station.since)}` : ""}` : station.state === "skipped" ? "not entered" : "ahead"}`).join("; ");
-  return <View accessible accessibilityRole="image" accessibilityLabel={`Pipeline. ${label}`} style={{ flexDirection: "row" }}>
-    {stations.map((station, index) => {
-      const current = station.state === "current";
-      const size = current ? 16 : station.state === "skipped" ? 8 : 11;
-      const color = current ? toneColor(theme, currentTone) : station.state === "done" ? done : "transparent";
-      return <View key={station.phase} style={{ flex: 1, minWidth: 0, alignItems: "center", gap: 6 }}>
-        <View style={{ height: 30, alignSelf: "stretch", flexDirection: "row", alignItems: "center" }}>
-          <View style={{ flex: 1, height: 2, backgroundColor: index ? segment(stations[index - 1], station) : "transparent" }} />
-          <View style={{ width: 30, height: 30, alignItems: "center", justifyContent: "center" }}>
-            {current && status !== "done" ? <Pulse color={color} size={size} /> : <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, borderWidth: station.state === "future" || station.state === "skipped" ? 2 : 0, borderColor: line(theme), borderStyle: station.state === "skipped" ? "dashed" : "solid" }} />}
-          </View>
-          <View style={{ flex: 1, height: 2, backgroundColor: index < stations.length - 1 ? segment(station, stations[index + 1]) : "transparent" }} />
-        </View>
-        <Text numberOfLines={1} style={{ ...text(theme, compact ? 11 : 12, current ? "700" : "500", !current && station.state !== "done"), ...(current ? { color: toneColor(theme, currentTone) } : {}) }}>{station.phase}{station.visits > 1 ? ` ↺${station.visits}` : ""}</Text>
-        <Text numberOfLines={1} style={{ ...text(theme, 11, "400", true), ...figures, marginTop: -6 }}>{station.since ? shortDate(station.since) : station.state === "skipped" ? OPTIONAL_PHASES.has(station.phase) ? "skipped" : "not entered" : " "}</Text>
-      </View>;
-    })}
-  </View>;
+  return <StationTrack theme={theme} compact={compact} label={`Pipeline. ${label}`} currentTone={status === "blocked" ? "danger" : status === "done" ? "success" : "accent"} moving={status !== "done"}
+    stations={stations.map((station) => ({ key: station.phase, state: station.state, label: `${station.phase}${station.visits > 1 ? ` ↺${station.visits}` : ""}`,
+      detail: station.since ? shortDate(station.since) : station.state === "skipped" ? OPTIONAL_PHASES.has(station.phase) ? "skipped" : "not entered" : null }))} />;
 }
 
-export type Need = { tone: Tone; title: string; detail: string | null; tab: BoardTab | null };
 const NEGATIVE_VERDICTS = new Set(["blocked", "fail", "failed", "not-met", "unverifiable"]);
 
 /** What waits on a person: an agent asking for input, a blocked pipeline, open questions, failed tasks and blocking reviews. */
@@ -84,26 +63,6 @@ export function needsFor(path: BoardPath, agent: WorkspaceAgent = null): Need[] 
   const final = path.reviews.current.final;
   if (final && NEGATIVE_VERDICTS.has(final.verdict ?? "")) needs.push({ tone: "danger", title: `Final review recorded as ${final.verdict}`, detail: null, tab: "reviews" });
   return needs;
-}
-
-const AGENT_VIEW = {
-  running: { tone: "accent", label: "Agent running" },
-  needs_input: { tone: "warning", label: "Agent waiting for you" },
-  attention: { tone: "warning", label: "Agent finished · needs a look" },
-  failed: { tone: "danger", label: "Agent failed" },
-  done: { tone: "neutral", label: "Agents idle" },
-} as const;
-
-function AgentChip({ agent, theme }: ThemeProps & { agent: WorkspaceAgent }) {
-  if (!agent) return null;
-  const view = AGENT_VIEW[agent.status];
-  const color = toneColor(theme, view.tone);
-  const moving = agent.status === "running" || agent.status === "needs_input";
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 2, minHeight: 28, paddingLeft: moving ? 0 : 10, paddingRight: 12, borderRadius: 999, backgroundColor: tint(theme, color, 0.14) }}>
-    {moving ? <Pulse color={color} size={7} /> : <View style={{ width: 8, height: 8, marginRight: 6, borderRadius: 4, backgroundColor: color }} />}
-    <Text style={{ ...text(theme, 12, "600"), color }}>{view.label}</Text>
-    {agent.since && <RelativeTime theme={theme} value={agent.since} prefix=" · since " style={text(theme, 12, "400", true)} />}
-  </View>;
 }
 
 function Hero({ path, usage, agent, theme, compact, onNavigate }: ThemeProps & { path: BoardPath; usage: UsageViewState; agent: WorkspaceAgent; compact: boolean; onNavigate(tab: BoardTab): void }) {
@@ -152,33 +111,6 @@ function Hero({ path, usage, agent, theme, compact, onNavigate }: ThemeProps & {
       })}
     </View>}
   </View>;
-}
-
-function Needs({ needs, path, theme, onNavigate }: ThemeProps & { needs: readonly Need[]; path: BoardPath; onNavigate(tab: BoardTab): void }) {
-  const success = toneColor(theme, "success");
-  if (!needs.length) return <View accessible style={{ flexDirection: "row", alignItems: "center", gap: 12, padding: 16, borderRadius: 14, backgroundColor: tint(theme, success, 0.1) }}>
-    <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: tint(theme, success, 0.25) }}><Text style={{ ...text(theme, 15, "700"), color: success }}>✓</Text></View>
-    <View style={{ flex: 1, gap: 1 }}>
-      <Text style={text(theme, 15, "600")}>Nothing needs you right now</Text>
-      <Text style={text(theme, 13, "400", true)}>No open question, failed task or blocking review is recorded{path.state.shipped ? "." : ", and no agent is waiting for input."}</Text>
-    </View>
-  </View>;
-  return <Section theme={theme} tone={needs.some((need) => need.tone === "danger") ? "danger" : "warning"} overline={`Needs you · ${needs.length}`} gap={4} padding={16}>
-    <View role="list" accessibilityLabel="What needs you">
-      {needs.map((need, index) => {
-        const body = <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start", paddingVertical: 8 }}>
-          <View style={{ width: 8, height: 8, marginTop: 7, borderRadius: 4, backgroundColor: toneColor(theme, need.tone) }} />
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text style={text(theme, 14, "600")}>{need.title}</Text>
-            {need.detail && <Text numberOfLines={2} style={text(theme, 13, "400", true)}>{need.detail}</Text>}
-          </View>
-          {need.tab && <Text style={{ ...text(theme, 12, "600"), color: toneColor(theme, need.tone) }}>Open →</Text>}
-        </View>;
-        const tab = need.tab;
-        return <View key={index} role="listitem">{tab ? <Pressable role="button" accessibilityLabel={`${need.title}. Open ${tab}.`} onPress={() => onNavigate(tab)}>{body}</Pressable> : body}</View>;
-      })}
-    </View>
-  </Section>;
 }
 
 function Figures({ usage, theme }: ThemeProps & { usage: UsageViewState }) {
@@ -284,10 +216,10 @@ export const overviewAlerts = (path: BoardPath | undefined, usage: UsageViewStat
 export function PathOverviewView({ state, usage, agent = null, onRefresh, onNavigate = () => undefined, theme, compact = false }: ThemeProps & { state: BoardViewState; usage: UsageViewState; agent?: WorkspaceAgent; onRefresh(): void; onNavigate?(tab: BoardTab): void; compact?: boolean }) {
   const path = state.snapshot?.path;
   const column = { flexGrow: compact ? 0 : 1, flexShrink: 1, flexBasis: compact ? "auto" as const : 0, minWidth: 0, gap: 16 };
-  return <PathFrame title="Overview" description="Where this milestone stands, what needs you, and what it has cost." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={overviewAlerts(path, usage)} notes={overviewNotes()}>
+  return <BoardFrame title="Overview" description="Where this milestone stands, what needs you, and what it has cost." subject="overview" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={overviewAlerts(path, usage)} notes={overviewNotes()}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : <>
       <FadeIn><Hero path={path} usage={usage} agent={agent} theme={theme} compact={compact} onNavigate={onNavigate} /></FadeIn>
-      <FadeIn delay={80}><Needs needs={needsFor(path, agent)} path={path} theme={theme} onNavigate={onNavigate} /></FadeIn>
+      <FadeIn delay={80}><Needs needs={needsFor(path, agent)} calm={`No open question, failed task or blocking review is recorded${path.state.shipped ? "." : ", and no agent is waiting for input."}`} theme={theme} onNavigate={onNavigate} /></FadeIn>
       {path.state.shipped && <ReportCard path={path} usage={usage} theme={theme} />}
       <FadeIn delay={140}><Figures usage={usage} theme={theme} /></FadeIn>
       <FadeIn delay={200}><View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "flex-start", gap: 16 }}>
@@ -295,5 +227,5 @@ export function PathOverviewView({ state, usage, agent = null, onRefresh, onNavi
         <View style={column}><Spend usage={usage} path={path} theme={theme} onNavigate={onNavigate} /></View>
       </View></FadeIn>
     </>}
-  </PathFrame>;
+  </BoardFrame>;
 }

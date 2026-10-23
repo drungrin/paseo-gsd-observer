@@ -1,18 +1,17 @@
 import { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
-import type { BoardUat, BoardUatPhase, UatRecordSection, UatResultKind, UatTest } from "../shared/uat.js";
+import type { BoardUatPhase, UatRecordSection, UatResultKind, UatTest } from "../shared/uat.js";
 import type { BoardTheme, BoardViewState } from "./board-components.js";
+import { BoardFrame, borderColor, Card, plural, smallStyle, textStyle, type ThemeProps } from "./board-frame.js";
+import { PhaseHeading, PhasePicker } from "./core-components.js";
+import { Legend, SegmentBar, Stat, surface, tint } from "./ui-kit.js";
 
 type Severity = NonNullable<UatTest["severity"]>;
 type RecordItem = UatRecordSection["items"][number];
 
-const textStyle = (theme: BoardTheme, muted = false) => ({ color: muted ? theme.colors.foregroundMuted : theme.colors.foreground, fontSize: 14, lineHeight: 21, flexShrink: 1 });
-const smallStyle = (theme: BoardTheme, muted = true) => ({ ...textStyle(theme, muted), fontSize: 12, lineHeight: 18 });
-const border = (theme: BoardTheme) => theme.colors.border ?? theme.colors.foregroundMuted;
+const border = borderColor;
 export const RESULT_LABELS: Record<UatResultKind, string> = { pass: "Pass", issue: "Issue", pending: "Pending", skipped: "Skipped", blocked: "Blocked", other: "Other" };
 const SOURCE_LABELS = { automated: "Automated", human: "Human", evidence: "Evidence dossier", other: "Other", unrecorded: "Not recorded" } as const;
-const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
 function resultColor(kind: UatResultKind, theme: BoardTheme): string {
   if (kind === "pass") return theme.colors.statusSuccess ?? theme.colors.accent;
@@ -62,15 +61,8 @@ export function defaultPhase(uat: { phases: readonly { id: string; current: bool
   return chosen ? { id: chosen.id, fallback: !!current } : { id: current?.id ?? uat.phases[0]?.id, fallback: false };
 }
 
-function Card({ title, subtitle, children, theme }: { title: string; subtitle?: string; children: React.ReactNode; theme: BoardTheme }) {
-  return <View style={{ minWidth: 0, padding: 16, gap: 10, borderRadius: 10, borderWidth: 1, borderColor: border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <View style={{ gap: 2 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 16, fontWeight: "600" }}>{title}</Text>{subtitle && <Text style={smallStyle(theme)}>{subtitle}</Text>}</View>
-    {children}
-  </View>;
-}
-
 function Badge({ label, color, theme }: { label: string; color: string; theme: BoardTheme }) {
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, borderWidth: 1, borderColor: border(theme) }}>
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: tint(theme, color, 0.12) }}>
     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
     <Text style={{ ...smallStyle(theme, false), fontWeight: "600" }}>{label}</Text>
   </View>;
@@ -81,9 +73,9 @@ function Field({ label, value, theme }: { label: string; value: string | null; t
   return <Text style={textStyle(theme, true)}><Text style={{ ...textStyle(theme), fontWeight: "600" }}>{label}: </Text>{value}</Text>;
 }
 
-function Toggle({ open, label, onPress, theme }: { open: boolean; label: string; onPress(): void; theme: BoardTheme }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`} accessibilityState={{ expanded: open }} {...(Platform.OS === "web" ? { "aria-expanded": open } : {})} onPress={onPress} style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 12, borderRadius: 7, borderWidth: 1, borderColor: border(theme) }}>
-    <Text style={textStyle(theme)}>{open ? `Hide ${label}` : `Show ${label}`}</Text>
+function ShowToggle({ open, label, onPress, theme }: { open: boolean; label: string; onPress(): void; theme: BoardTheme }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`} accessibilityState={{ expanded: open }} {...(Platform.OS === "web" ? { "aria-expanded": open } : {})} onPress={onPress} style={{ minHeight: 36, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 14, borderRadius: 999, backgroundColor: surface(theme, 2) }}>
+    <Text style={{ ...textStyle(theme), fontSize: 13, fontWeight: "500" }}>{open ? `Hide ${label}` : `Show ${label}`}</Text>
   </Pressable>;
 }
 
@@ -134,16 +126,19 @@ function RecordCard({ section, theme }: { section: UatRecordSection; theme: Boar
   </Card>;
 }
 
-function Fact({ label, value, detail, attention, theme }: { label: string; value: string; detail?: string | null; attention?: boolean; theme: BoardTheme }) {
-  return <View accessible accessibilityLabel={`${label}: ${value}${detail ? `. ${detail}` : ""}`} style={{ flexGrow: 1, flexBasis: 180, minWidth: 0, padding: 12, gap: 4, borderRadius: 8, borderWidth: 1, borderColor: attention ? theme.colors.statusWarning ?? theme.colors.accent : border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <Text style={smallStyle(theme)}>{label}</Text>
-    <Text style={{ ...textStyle(theme), fontWeight: "600" }}>{value}</Text>
-    {detail && <Text style={smallStyle(theme)}>{detail}</Text>}
+const RESULT_ORDER = ["pass", "issue", "blocked", "pending", "skipped", "other"] as const;
+
+/** Every recorded test of the phase as one bar, by result. */
+function ResultBar({ phase, theme }: ThemeProps & { phase: BoardUatPhase }) {
+  const present = RESULT_ORDER.filter((kind) => phase.results[kind] > 0);
+  return <View style={{ gap: 8 }}>
+    <SegmentBar theme={theme} height={14} label={present.map((kind) => `${phase.results[kind]} ${RESULT_LABELS[kind].toLowerCase()}`).join(", ") || "No tests"} segments={RESULT_ORDER.map((kind) => ({ label: kind, value: phase.results[kind], color: kind === "pending" ? tint(theme, theme.colors.foregroundMuted, 0.35) : resultColor(kind, theme) }))} />
+    <Legend theme={theme} items={present.map((kind) => ({ color: kind === "pending" ? tint(theme, theme.colors.foregroundMuted, 0.35) : resultColor(kind, theme), label: `${phase.results[kind]} ${RESULT_LABELS[kind].toLowerCase()}` }))} />
   </View>;
 }
 
 function PhaseUat({ phase, theme, compact, testsOpen, sectionsOpen, onToggleTests, onToggleSections }: { phase: BoardUatPhase; theme: BoardTheme; compact: boolean; testsOpen: boolean; sectionsOpen: boolean; onToggleTests(): void; onToggleSections(): void }) {
-  if (phase.observation !== "observed") return <Card title={`Phase ${phase.id} · ${phase.title}`} theme={theme}>
+  if (phase.observation !== "observed") return <Card title={`Phase ${phase.id} · ${phase.title}`} source="UAT.md" theme={theme} attention={phase.observation === "unavailable"}>
     <Text style={textStyle(theme, true)}>{phase.observation === "unavailable" ? "UAT.md could not be read safely for this phase." : "No UAT.md observed for this phase yet."}</Text>
   </Card>;
   const attention = phase.tests.filter(needsAttention);
@@ -154,18 +149,17 @@ function PhaseUat({ phase, theme, compact, testsOpen, sectionsOpen, onToggleTest
   const judged = (["automated", "human", "evidence", "other"] as const).filter((kind) => sources[kind]).map((kind) => `${sources[kind]} ${SOURCE_LABELS[kind].toLowerCase()}`).join(" · ");
   const current = phase.currentTest && phase.currentTest.state !== "complete" ? phase.currentTest : null;
   return <View style={{ gap: 16 }}>
-    <View style={{ gap: 5 }}>
-      <Text role="heading" style={{ ...textStyle(theme), fontSize: 19, lineHeight: 25, fontWeight: "600" }}>Phase {phase.id} · {phase.title}</Text>
-      <Text style={smallStyle(theme)}>UAT.md observed{phase.startedAt ? ` · Started ${phase.startedAt}` : ""}{phase.updatedAt ? ` · Updated ${phase.updatedAt}` : ""}</Text>
-      <Text style={smallStyle(theme)}>Results are recorded in the document; they are not a live test run.</Text>
+    <PhaseHeading theme={theme} source="UAT.md" id={phase.id} title={phase.title} facts={["UAT.md observed", phase.startedAt ? `Started ${phase.startedAt}` : null, phase.updatedAt ? `Updated ${phase.updatedAt}` : null]} />
+    {(JSON.stringify(phase).includes("[omitted]") || phase.excerptsLimited) && <View style={{ gap: 2 }}>
       {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, absolute paths, links and host-like text are shown as [omitted].</Text>}
       {phase.excerptsLimited && <Text role="alert" style={smallStyle(theme)}>Some UAT text could not be safely extracted or was shortened.</Text>}
-    </View>
+    </View>}
+    {phase.testCount > 0 && <ResultBar phase={phase} theme={theme} />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-      <Fact label="Recorded status" value={phase.recordedStatus ?? "Not recorded"} detail={current ? `Current test: ${current.number !== null ? `${current.number} · ` : ""}${current.text ?? "recorded"}` : null} theme={theme} />
-      <Fact label="Test results" value={phase.testCount ? `${results.pass} of ${phase.testCount} pass` : "No tests recorded"} detail={breakdown || (phase.testCount ? "Every recorded result is a pass." : null)} attention={results.issue + results.blocked + results.pending > 0} theme={theme} />
-      <Fact label="Judged by" value={judged || "Not recorded"} detail={sources.unrecorded ? `${sources.unrecorded} without a recorded source` : null} theme={theme} />
-      <Fact label="Gaps" value={phase.gapCount ? `${phase.gapCount} recorded · ${phase.openGapCount} open` : "None recorded"} attention={phase.openGapCount > 0} theme={theme} />
+      <Stat theme={theme} size={18} label="Recorded status" value={phase.recordedStatus ?? "Not recorded"} detail={current ? `Current test: ${current.number !== null ? `${current.number} · ` : ""}${current.text ?? "recorded"}` : null} />
+      <Stat theme={theme} size={18} label="Test results" value={phase.testCount ? `${results.pass} of ${phase.testCount} pass` : "No tests recorded"} detail={breakdown || (phase.testCount ? "Every recorded result is a pass." : null)} tone={results.issue + results.blocked ? "danger" : results.pending ? "warning" : phase.testCount && results.pass === phase.testCount ? "success" : undefined} />
+      <Stat theme={theme} size={18} label="Judged by" value={judged || "Not recorded"} detail={sources.unrecorded ? `${sources.unrecorded} without a recorded source` : null} />
+      <Stat theme={theme} size={18} label="Gaps" value={phase.gapCount ? `${phase.gapCount} recorded · ${phase.openGapCount} open` : "None recorded"} tone={phase.openGapCount > 0 ? "warning" : undefined} />
     </View>
     <View style={{ gap: 4 }}>
       {!summary ? <Text style={smallStyle(theme)}>No Summary section recorded.</Text>
@@ -189,12 +183,12 @@ function PhaseUat({ phase, theme, compact, testsOpen, sectionsOpen, onToggleTest
     <Card title="Other tests" subtitle={others.length ? `${plural(others.length, "test")}${others.every((test) => test.result.kind === "pass") ? " · all pass" : ""}` : undefined} theme={theme}>
       {others.length ? <>
         <Text style={smallStyle(theme)}>Automated or unattributed checks with a passing result and no issue history.</Text>
-        <Toggle open={testsOpen} label={`${plural(others.length, "test")} for phase ${phase.id}`} onPress={onToggleTests} theme={theme} />
+        <ShowToggle open={testsOpen} label={`${plural(others.length, "test")} for phase ${phase.id}`} onPress={onToggleTests} theme={theme} />
         {testsOpen && others.map((test, index) => <TestItem key={`${index}:${test.number}`} test={test} theme={theme} compact={compact} detailed={false} />)}
       </> : <Text style={textStyle(theme, true)}>No other tests.</Text>}
     </Card>
     {phase.otherSections.length > 0 && <Card title="Other document sections" theme={theme}>
-      <Toggle open={sectionsOpen} label={`other sections for phase ${phase.id}`} onPress={onToggleSections} theme={theme} />
+      <ShowToggle open={sectionsOpen} label={`other sections for phase ${phase.id}`} onPress={onToggleSections} theme={theme} />
       {sectionsOpen && <View style={{ gap: 12 }}>
         <Text style={smallStyle(theme)}>Short safe excerpts in source order; not the full UAT.md.</Text>
         {phase.otherSections.map((section) => <View key={section.title} style={{ gap: 4 }}><Text style={{ ...textStyle(theme), fontWeight: "600" }}>{section.title}</Text>
@@ -204,7 +198,13 @@ function PhaseUat({ phase, theme, compact, testsOpen, sectionsOpen, onToggleTest
   </View>;
 }
 
-export function UatView({ state, onRefresh, theme, compact = false }: { state: BoardViewState; onRefresh(): void; theme: BoardTheme; compact?: boolean }) {
+/** The caveats behind the UAT tab. */
+export const uatNotes = () => [
+  "Results are recorded in the document; they are not a live test run.",
+  "UAT is per phase, so nothing is aggregated across phases.",
+];
+
+export function UatView({ state, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; onRefresh(): void; compact?: boolean }) {
   const [selection, setSelection] = useState<{ workspaceId: string; phaseId: string } | null>(null);
   const [open, setOpen] = useState<{ workspaceId: string; keys: string[] }>({ workspaceId: "", keys: [] });
   const uat = state.snapshot?.overview?.uat;
@@ -215,35 +215,21 @@ export function UatView({ state, onRefresh, theme, compact = false }: { state: B
   const current = uat?.phases.find((phase) => phase.current);
   const isOpen = (key: string) => open.workspaceId === state.workspaceId && open.keys.includes(key);
   const toggle = (key: string) => setOpen({ workspaceId: state.workspaceId, keys: isOpen(key) ? open.keys.filter((item) => item !== key) : [...(open.workspaceId === state.workspaceId ? open.keys : []), key] });
-  return <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: compact ? 16 : 24, paddingBottom: 32, gap: 18 }} nestedScrollEnabled>
-    <View style={{ flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "stretch" : "center", gap: 14 }}>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 24, lineHeight: 30, fontWeight: "600" }}>UAT</Text><Text style={textStyle(theme, true)}>User acceptance testing recorded for each current-milestone phase.</Text></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={state.busy ? "Refreshing UAT" : "Refresh UAT"} accessibilityState={{ disabled: state.busy, busy: state.busy }} disabled={state.busy} onPress={onRefresh} style={{ minHeight: 44, alignSelf: compact ? "flex-start" : "auto", justifyContent: "center", paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}><Text style={textStyle(theme)}>{state.busy ? "Refreshing…" : "Refresh"}</Text></Pressable>
-    </View>
-    {state.busy && !state.snapshot ? <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>Loading UAT…</Text> : <>
-      {state.error && <Text role="alert" style={textStyle(theme)}>Could not refresh UAT. {state.snapshot ? "The last snapshot is still displayed." : "Try refreshing again."}</Text>}
-      {(state.snapshot?.freshness === "stale" || state.snapshot?.freshness === "refresh-failed") && <Text style={textStyle(theme, true)}>Planning files may have changed. Refresh to update UAT.</Text>}
-      {state.refreshAnnouncement && <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>{state.refreshAnnouncement}</Text>}
-      {uat?.availability === "available" ? <>
-        {uat.limited && <Text role="alert" style={smallStyle(theme)}>Some UAT evidence or safe excerpts may be incomplete.</Text>}
-        {uat.phases.length > 0 ? <>
-          <View accessibilityLabel="UAT phases" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {uat.phases.map((phase) => {
-              const summary = phaseSummary(phase);
-              const isSelected = phase.id === selectedId;
-              return <Pressable key={phase.id} accessibilityRole="button" accessibilityLabel={`Phase ${phase.id}${phase.current ? ", current" : ""}: ${summary.text}`} accessibilityState={{ selected: isSelected }} {...(Platform.OS === "web" ? { "aria-pressed": isSelected } : {})} onPress={() => setSelection({ workspaceId: state.workspaceId, phaseId: phase.id })} style={{ minHeight: 44, justifyContent: "center", gap: 1, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 7, borderWidth: 1, borderColor: isSelected ? theme.colors.accent : border(theme), backgroundColor: isSelected ? theme.colors.surface2 ?? theme.colors.surface0 : theme.colors.surface1 ?? theme.colors.surface0 }}>
-                <Text style={{ ...textStyle(theme), fontWeight: isSelected ? "600" : "400" }}>Phase {phase.id}{phase.current ? " · Current" : ""}</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  {summary.attention && <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.colors.statusWarning ?? theme.colors.accent }} />}
-                  <Text style={smallStyle(theme)}>{summary.text}</Text>
-                </View>
-              </Pressable>;
-            })}
-          </View>
-          {!chosen && fallback.fallback && current?.observation === "not_observed" && selected && <Text style={smallStyle(theme)}>Phase {current.id} (current) has no UAT yet; showing Phase {selected.id}, the most recent phase with a UAT.</Text>}
-          {selected && <PhaseUat phase={selected} theme={theme} compact={compact} testsOpen={isOpen(`${selected.id}:tests`)} sectionsOpen={isOpen(`${selected.id}:sections`)} onToggleTests={() => toggle(`${selected.id}:tests`)} onToggleSections={() => toggle(`${selected.id}:sections`)} />}
-        </> : <Text style={textStyle(theme, true)}>No current-milestone phases declared in the roadmap.</Text>}
-      </> : <Card title="UAT unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></Card>}
-    </>}
-  </ScrollView>;
+  return <BoardFrame title="UAT" description="User acceptance testing recorded for each phase: what passed, what a person judged, and the issues found." subject="UAT" state={state} onRefresh={onRefresh} theme={theme} compact={compact}
+    alerts={uat?.limited ? ["Some UAT evidence or safe excerpts may be incomplete."] : []} notes={uatNotes()}>
+    {uat?.availability === "available" ? <>
+      {uat.phases.length > 0 ? <>
+        <PhasePicker label="UAT phases" selected={selectedId ?? null} onSelect={(id) => setSelection({ workspaceId: state.workspaceId, phaseId: id })} theme={theme} phases={uat.phases.map((phase) => {
+          const summary = phaseSummary(phase);
+          const observed = phase.observation === "observed";
+          return { id: phase.id, current: phase.current, description: summary.text,
+            tone: summary.attention ? phase.results.issue + phase.results.blocked > 0 ? "danger" : "warning" : observed && phase.testCount && phase.results.pass === phase.testCount ? "success" : null,
+            detail: !observed ? summary.text.toLowerCase() : phase.testCount ? `${phase.results.pass}/${phase.testCount} pass` : "no tests",
+            percent: observed && phase.testCount ? phase.results.pass / phase.testCount * 100 : undefined };
+        })} />
+        {!chosen && fallback.fallback && current?.observation === "not_observed" && selected && <Text style={smallStyle(theme)}>Phase {current.id} (current) has no UAT yet; showing Phase {selected.id}, the most recent phase with a UAT.</Text>}
+        {selected && <PhaseUat phase={selected} theme={theme} compact={compact} testsOpen={isOpen(`${selected.id}:tests`)} sectionsOpen={isOpen(`${selected.id}:sections`)} onToggleTests={() => toggle(`${selected.id}:tests`)} onToggleSections={() => toggle(`${selected.id}:sections`)} />}
+      </> : <Text style={textStyle(theme, true)}>No current-milestone phases declared in the roadmap.</Text>}
+    </> : <Card title="UAT unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></Card>}
+  </BoardFrame>;
 }

@@ -1,7 +1,8 @@
 import { Text, View } from "react-native";
 import type { PathQuestion } from "../shared/path.js";
 import type { BoardViewState } from "./board-components.js";
-import { Badge, Card, Count, PathFrame, SetupNotice, smallStyle, textStyle, tokenLabel, warningAlerts, type ThemeProps } from "./path-components.js";
+import { Badge, Card, Count, BoardFrame, smallStyle, textStyle, tokenLabel, type ThemeProps } from "./board-frame.js";
+import { SetupNotice, warningAlerts } from "./path-components.js";
 
 const statusLabel = (status: string | null) => status === "needs-user" ? "Needs user" : tokenLabel(status);
 
@@ -26,7 +27,7 @@ export function questionsNotes(): string[] {
 export function PathQuestionsView({ state, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; onRefresh(): void; compact?: boolean }) {
   const path = state.snapshot?.path;
   const questions = path?.questions;
-  return <PathFrame title="Questions" description="Discussion answers that still need a follow-up, from discuss/ANSWERS.md." subject="questions" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={warningAlerts(path, (warning) => warning.startsWith("questions-"))} notes={questionsNotes()}>
+  return <BoardFrame title="Questions" description="Discussion answers that still need a follow-up, from discuss/ANSWERS.md." subject="questions" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={warningAlerts(path, (warning) => warning.startsWith("questions-"))} notes={questionsNotes()}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : questions?.availability === "available" ? <>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         <Count label="Pending follow-ups" value={questions.counts.pending} theme={theme} attention={questions.counts.pending > 0} />
@@ -39,5 +40,5 @@ export function PathQuestionsView({ state, onRefresh, theme, compact = false }: 
     </> : <Card title={questions?.availability === "absent" ? "No discussion recorded" : "Questions unavailable"} theme={theme}>
       <Text style={textStyle(theme, true)}>{questions?.availability === "absent" ? "GSD Path writes discuss/ANSWERS.md when a discussion records an answer." : "The discussion answers file could not be read safely."}</Text>
     </Card>}
-  </PathFrame>;
+  </BoardFrame>;
 }

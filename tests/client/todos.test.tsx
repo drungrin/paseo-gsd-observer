@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("react-native", () => ({ View: "View", Text: "Text", Pressable: "Pressable", Platform: { OS: "web" } }));
+vi.mock("react-native", async () => (await import("../helpers/react-native-mock")).reactNativeMock);
 vi.mock("@getpaseo/plugin/client/react-native", () => ({ ScrollView: "PaseoScrollView" }));
 vi.mock("react", async (importOriginal) => {
-  const original = await importOriginal<typeof import("react")>();
-  return { ...original, useState: vi.fn((value: unknown) => [value, vi.fn()]) };
+  const hooks = (await import("../helpers/react-native-mock")).reactHooksMock(await importOriginal<typeof import("react")>());
+  return { ...hooks, useState: vi.fn(hooks.useState) };
 });
 
 import { useState } from "react";
-import { matchedTodos, TodosView } from "../../client/todos-components";
+import { expand } from "../helpers/react-native-mock";
+import { matchedTodos, todosNotes, TodosView } from "../../client/todos-components";
 import type { BoardViewState } from "../../client/board-components";
+import { liveStatus } from "../../client/board-frame";
 import type { BoardTodos, TodoItem } from "../../shared/todos";
 import type { BoardOverview } from "../../shared/overview";
 
@@ -25,37 +27,29 @@ const state = (todos = data()): BoardViewState => ({ workspaceId: "selected", bu
   overview: { todos } as BoardOverview,
 } });
 type Node = { type?: unknown; props?: Record<string, unknown> };
-const nodes = (node: unknown): Node[] => {
-  if (Array.isArray(node)) return node.flatMap(nodes);
-  if (!node || typeof node !== "object") return [];
-  const value = node as Node;
-  return [value, ...nodes(value.props?.children)];
-};
-const text = (node: unknown): string => {
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(text).join("");
-  if (!node || typeof node !== "object") return "";
-  return text((node as Node).props?.children);
-};
-const expand = (node: unknown): unknown => {
-  if (Array.isArray(node)) return node.map(expand);
-  if (!node || typeof node !== "object") return node;
-  const value = node as Node;
-  if (typeof value.type === "function") return expand((value.type as (props: Record<string, unknown>) => unknown)(value.props ?? {}));
-  return { ...value, props: { ...value.props, children: expand(value.props?.children) } };
-};
+const nodes = (node: unknown): Node[] => Array.isArray(node) ? node.flatMap(nodes) : node && typeof node === "object" ? [node as Node, ...nodes((node as Node).props?.children)] : [];
+const text = (node: unknown): string => typeof node === "string" || typeof node === "number" ? String(node) : Array.isArray(node) ? node.map(text).join("") : node && typeof node === "object" ? text((node as Node).props?.children) : "";
 const view = (todos?: BoardTodos, compact = false) => expand(TodosView({ state: state(todos), theme, compact, onRefresh: vi.fn() }));
+/** The folder counts, without the folder bar that also carries an accessible label. */
+const facts = (tree: unknown) => nodes(tree).filter((node) => node.props?.accessible && node.props?.accessibilityRole !== "image").map((node) => node.props?.accessibilityLabel);
+const bar = (tree: unknown) => nodes(tree).find((node) => node.props?.accessible && node.props?.accessibilityRole === "image");
+/** The next TodosView render reads this as its stored filter. */
+const stored = (filter: { workspaceId: string; lifecycle: string; importance: string }, setter = vi.fn()) => {
+  vi.mocked(useState).mockImplementationOnce((() => [filter, setter]) as unknown as typeof useState);
+  return setter;
+};
 
 describe("TODO tab", () => {
   it("lists standalone files project-wide with physical counts and distinct-name/recorded-status caveats", () => {
     const tree = view();
     const content = text(tree);
-    expect(content).toContain("Standalone planning TODO files for this workspace. Read-only");
+    expect(todosNotes()[0]).toContain("Standalone planning TODO files for this workspace. Read-only");
     expect(content).toContain("4 files safely read · 3 distinct filenames · 4 safe cards shown.");
     const single = data(); single.items = [single.items[0]]; single.counts = { ...single.counts, totalFiles: 1, distinctTasks: 1, displayed: 1, duplicates: 0, conflicts: 0 };
     expect(text(view(single))).toContain("1 record matches the current filters.");
-    expect(content).toContain("2 files share names across folders · 1 folder/status disagreement.");
-    expect(content).toContain("Folder counts exclude unreadable files and are not inferred work states.");
+    expect(content).toContain("2 files share names across folders.");
+    expect(content).toContain("1 folder/status disagreement.");
+    expect(todosNotes()).toContain("Folder counts exclude unreadable files and are not inferred work states.");
     expect(content).toContain("Recorded status disagrees with the folder; both are shown without changing the task.");
     expect(content).toContain("Another TODO file has the same name in a different folder; both records are shown.");
     expect(content).toContain("Recorded status: deferred");
@@ -65,11 +59,37 @@ describe("TODO tab", () => {
     expect(content).toContain("Completed: 2026-09-02");
     expect(content).not.toContain("Create TODO");
     expect(content).not.toContain("Delete");
-    const facts = nodes(tree).filter((node) => node.props?.accessible).map((node) => node.props?.accessibilityLabel);
-    expect(facts).toEqual(["Pending folder: 1", "Backlog / deferred folders: 1", "Done / completed folders: 1", "Root-level files: 1"]);
+    expect(facts(tree)).toEqual(["Pending folder: 1", "Backlog / deferred folders: 1", "Done / completed folders: 1", "Root-level files: 1"]);
     const filters = nodes(tree).filter((node) => (node.props?.accessibilityLabel as string | undefined)?.startsWith("Filter:"));
     expect(filters.map((node) => node.props?.accessibilityLabel)).toEqual(["Filter: All", "Filter: Pending", "Filter: Backlog", "Filter: Completed", "Filter: Unclassified", "Filter: Any importance", "Filter: high", "Filter: medium", "Filter: minor"]);
     expect(filters[0].props).toMatchObject({ accessibilityState: { selected: true }, "aria-pressed": true });
+    expect(filters[1].props).toMatchObject({ accessibilityState: { selected: false }, "aria-pressed": false });
+  });
+
+  it("labels each card by the folder it sits in, beside what the file records", () => {
+    const content = text(view());
+    expect(content).toContain("Pending folderSeverity: high");
+    expect(content).toContain("Backlog folderRecorded status: openSeverity: minor");
+    expect(content).toContain("Completed folderPriority: medium");
+    expect(content).toContain("TODO rootRecorded status: deferred");
+    // Folder placement is never rewritten from a recorded status.
+    expect(content).not.toContain("Deferred folder");
+    const hyphenated = data(); hyphenated.items = [item({ recordedStatus: "risk-accepted" })];
+    expect(text(view(hyphenated))).toContain("Recorded status: risk accepted");
+  });
+
+  it("splits the folder bar by physical folder and reads it out in words", () => {
+    const tree = view();
+    expect(bar(tree)?.props?.accessibilityLabel).toBe("1 pending, 1 backlog or deferred, 1 done or completed, 1 at the root");
+    expect(text(tree)).toContain("1 pending1 backlog or deferred1 done or completed1 at the root");
+    const deferred = data(); deferred.counts = { ...deferred.counts, backlog: 0, deferred: 2, completed: 0, done: 3, root: 0 };
+    const tally = view(deferred);
+    expect(bar(tally)?.props?.accessibilityLabel).toBe("1 pending, 2 backlog or deferred, 3 done or completed, 0 at the root");
+    // The legend lists only folders that hold files.
+    expect(text(tally)).toContain("1 pending2 backlog or deferred3 done or completed");
+    expect(text(tally)).not.toContain("0 at the root");
+    const empty = data(); empty.items = []; empty.counts = { pending: 0, backlog: 0, deferred: 0, done: 0, completed: 0, root: 0, totalFiles: 0, distinctTasks: 0, unavailable: 0, duplicates: 0, conflicts: 0, displayed: 0 };
+    expect(bar(view(empty))).toBeUndefined();
   });
 
   it("filters by lifecycle and either recorded severity or priority without turning root status into directory placement", () => {
@@ -84,13 +104,24 @@ describe("TODO tab", () => {
   });
 
   it("keeps the clear-importance control reachable when a refresh removes the selected value", () => {
-    vi.mocked(useState).mockImplementationOnce(((value: unknown) => [{ workspaceId: "selected", lifecycle: "all", importance: "high" }, vi.fn()]) as unknown as typeof useState);
+    const setter = stored({ workspaceId: "selected", lifecycle: "all", importance: "high" });
     const changed = data(); changed.items = changed.items.map((entry) => ({ ...entry, severity: null, priority: null }));
     const tree = view(changed);
     expect(text(tree)).toContain("No safe TODO cards match these filters.");
     const reset = nodes(tree).find((node) => node.props?.accessibilityLabel === "Filter: Any importance");
     expect(reset?.props).toMatchObject({ accessibilityState: { selected: false }, "aria-pressed": false });
-    expect(typeof reset?.props?.onPress).toBe("function");
+    (reset!.props!.onPress as () => void)();
+    expect(setter).toHaveBeenLastCalledWith({ workspaceId: "selected", lifecycle: "all", importance: "all" });
+  });
+
+  it("resets the filters on a workspace change", () => {
+    const setter = stored({ workspaceId: "other", lifecycle: "backlog", importance: "minor" });
+    const tree = view();
+    const pressed = nodes(tree).filter((node) => (node.props?.accessibilityLabel as string | undefined)?.startsWith("Filter:") && node.props?.["aria-pressed"]);
+    expect(pressed.map((node) => node.props?.accessibilityLabel)).toEqual(["Filter: All", "Filter: Any importance"]);
+    expect(text(tree)).toContain("4 records match the current filters.");
+    (nodes(tree).find((node) => node.props?.accessibilityLabel === "Filter: Completed")!.props!.onPress as () => void)();
+    expect(setter).toHaveBeenLastCalledWith({ workspaceId: "selected", lifecycle: "completed", importance: "all" });
   });
 
   it("distinguishes absent and empty directories, unknown evidence, local failures, caps, loading and stale snapshots", () => {
@@ -103,15 +134,38 @@ describe("TODO tab", () => {
     expect(text(view(empty))).toContain("No TODO files were observed; the directory state is unknown.");
     const limited = data(); limited.limited = true; limited.counts.unavailable = 2; limited.counts.displayed = 3;
     expect(text(view(limited))).toContain("The TODO inventory or its safe excerpts are incomplete; counts cover only observed files.");
+    expect(text(view(limited))).toContain("4 files safely read");
+    expect(text(view(limited))).toContain("; additional files may not have safe cards.");
     limited.countsComplete = false;
     expect(text(view(limited))).toContain("At least 4 files safely read");
-    expect(text(view(limited))).toContain("2 TODO observations unavailable");
+    expect(bar(view(limited))?.props?.accessibilityLabel).toMatch(/^at least \d+ pending, at least \d+ backlog or deferred, at least \d+ done or completed, at least \d+ at the root$/);
+    expect(text(view(limited))).toContain("2 TODO observations unavailable.");
     const unreadable = { ...empty, directoryState: "observed" as const, limited: true, counts: { ...empty.counts, unavailable: 1 } };
-    expect(text(view(unreadable))).toContain("TODO files or directories could not be safely inspected; no records are shown.");
+    const unreadableText = text(view(unreadable));
+    expect(unreadableText).toContain("TODO inventory incomplete");
+    expect(unreadableText).toContain("TODO files or directories could not be safely inspected; no records are shown.");
+    expect(unreadableText).toContain("1 TODO observation unavailable.");
+    expect(unreadableText).not.toContain("No standalone TODO files");
     const loading: BoardViewState = { workspaceId: "other", snapshot: null, busy: true, error: null };
-    expect(text(TodosView({ state: loading, theme, onRefresh: vi.fn() }))).toContain("Loading TODOs…");
+    expect(text(expand(TodosView({ state: loading, theme, onRefresh: vi.fn() })))).toContain("Loading TODOs…");
     const stale = state(); stale.snapshot!.freshness = "stale";
-    expect(text(expand(TodosView({ state: stale, theme, compact: true, onRefresh: vi.fn() })))).toContain("Refresh to update TODOs.");
+    expect(liveStatus(stale).label).toBe("Files changed · updating");
+    expect(text(expand(TodosView({ state: stale, theme, compact: true, onRefresh: vi.fn() })))).toContain("Files changed · updating");
+    const failed = { ...state(), error: "Could not refresh evidence." };
+    const failedText = text(expand(TodosView({ state: failed, theme, onRefresh: vi.fn() })));
+    expect(failedText).toContain("Could not refresh TODOs. The last snapshot is still displayed.");
+    expect(failedText).toContain("Out of date");
     expect(text(view({ ...data(), availability: "unavailable" }))).toContain("No readable planning inventory was found for this workspace.");
+  });
+
+  it("keeps qualifiers visible and folds the reading notes", () => {
+    const element = TodosView({ state: state(), theme, onRefresh: vi.fn() }) as { props: { notes: string[]; alerts: string[] } };
+    expect(element.props.notes).toEqual(todosNotes());
+    expect(element.props.alerts).toEqual(["2 files share names across folders.", "1 folder/status disagreement."]);
+    const calm = data(); calm.counts = { ...calm.counts, duplicates: 0, conflicts: 0 };
+    expect(TodosView({ state: state(calm), theme, onRefresh: vi.fn() }).props.alerts).toEqual([]);
+    const tree = view();
+    expect(nodes(tree).find((node) => node.props?.accessibilityLabel === "About these figures")?.props).toMatchObject({ accessibilityState: { expanded: false } });
+    expect(text(tree)).not.toContain("are not inferred work states");
   });
 });

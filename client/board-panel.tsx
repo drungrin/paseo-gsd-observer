@@ -3,7 +3,7 @@ import { useRpc, useWorkspace } from "@getpaseo/plugin/client";
 import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { View } from "react-native";
 import { BoardTabs, pathBadges, tabsFor, type BoardTab, type TabFocusTarget } from "./board-tabs.js";
-import { OverviewView } from "./overview-components.js";
+import { coreBadges, OverviewView } from "./overview-components.js";
 import { PlansView } from "./plans-components.js";
 import { ContextView } from "./context-components.js";
 import { ValidationView } from "./validation-components.js";
@@ -129,7 +129,7 @@ export function BoardPanel({ workspaceId, theme, layout, initialTab = "overview"
   useEffect(() => { setShowTable(false); }, [workspaceId]);
   const view = { state, theme: theme as BoardTheme, compact, onRefresh };
   const panels: Record<BoardTab, () => ReactNode> = {
-    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} usage={usage} agent={agent} onNavigate={navigate} /> : <OverviewView {...view} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
+    overview: () => flavor === "gsd-path" ? <PathOverviewView {...view} usage={usage} agent={agent} onNavigate={navigate} /> : <OverviewView {...view} agent={agent} onNavigate={navigate} showTable={showTable} onToggleTable={() => setShowTable((value) => !value)} />,
     plans: () => <PlansView {...view} />,
     context: () => <ContextView {...view} />,
     validation: () => <ValidationView {...view} />,
@@ -146,7 +146,7 @@ export function BoardPanel({ workspaceId, theme, layout, initialTab = "overview"
     ledger: () => <PathLedgerView {...view} usage={usage} onRefresh={onRefreshLedger} onLoadLedger={(more) => { void usageController.loadLedger(more); }} />,
   };
   return <View onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)} style={{ flex: 1, minHeight: 0, backgroundColor: theme.colors.surface0 }}>
-    <BoardTabs tabs={tabs} badges={flavor === "gsd-path" ? pathBadges(state.snapshot?.path) : {}} activeTab={activeTab} focusedTab={focusedTab} onSelect={navigate} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />
+    <BoardTabs tabs={tabs} badges={flavor === "gsd-path" ? pathBadges(state.snapshot?.path) : flavor === "gsd-core" ? coreBadges(state.snapshot?.overview) : {}} activeTab={activeTab} focusedTab={focusedTab} onSelect={navigate} onFocus={setFocusedTab} idPrefix={idPrefix} tabRefs={tabRefs} theme={theme as BoardTheme} compact={compact} />
     {tabs.map(({ id }) => <View key={id} nativeID={`${idPrefix}-panel-${id}`} role="tabpanel" aria-labelledby={`${idPrefix}-tab-${id}`} aria-hidden={activeTab !== id} importantForAccessibility={activeTab === id ? "auto" : "no-hide-descendants"} style={{ flex: 1, minHeight: 0, display: activeTab === id ? "flex" : "none" }}>
       {built.has(id) ? panels[id]() : null}
     </View>)}

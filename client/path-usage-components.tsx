@@ -1,6 +1,6 @@
 import { Text, View } from "react-native";
 import type { BoardUsage } from "../shared/usage.js";
-import { borderColor, Card, DataTable, smallStyle, textStyle, type ThemeProps } from "./path-components.js";
+import { borderColor, Card, DataTable, smallStyle, textStyle, type ThemeProps } from "./board-frame.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { integer, money, tokens, usageFigures } from "./usage-format.js";
 

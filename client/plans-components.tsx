@@ -1,15 +1,18 @@
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import type { BoardOverview } from "../shared/overview.js";
-import type { BoardTheme, BoardViewState } from "./board-components.js";
+import type { BoardViewState } from "./board-components.js";
+import { Badge, BoardFrame, borderColor, Card, plural, smallStyle, textStyle, type ThemeProps } from "./board-frame.js";
+import { PhasePicker } from "./core-components.js";
 import { PhaseChecks } from "./phase-checks.js";
+import { figures, Flash, kicker, Legend, line, Pill, Section, SegmentBar, surface, text, tint, toneColor, Toggle, type Tone } from "./ui-kit.js";
 
 type Plans = BoardOverview["plans"];
 type Phase = Plans["phases"][number];
 type Plan = Phase["entries"][number];
 
-const textStyle = (theme: BoardTheme, muted = false) => ({ color: muted ? theme.colors.foregroundMuted : theme.colors.foreground, fontSize: 14, lineHeight: 20, flexShrink: 1 });
+/** How long a plan that just changed keeps its ring when the tab is opened after the change. */
+const FLASH_MS = 6_000;
 
 export function planEvidenceLabel(plan: Plan): string[] {
   return [
@@ -19,80 +22,163 @@ export function planEvidenceLabel(plan: Plan): string[] {
   ];
 }
 
-function PlanRow({ plan, phaseId, expanded, onToggle, theme, compact }: { plan: Plan; phaseId: string; expanded: boolean; onToggle(): void; theme: BoardTheme; compact: boolean }) {
-  const evidence = planEvidenceLabel(plan);
-  const accessibleTitle = (plan.title ?? "title not observed").replace(/[.!?]+$/, "");
-  return <View style={{ borderTopWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Plan ${plan.id}: ${accessibleTitle}. ${plan.wave === null ? "Wave not recorded" : `Wave ${plan.wave}`}. ${evidence.join(". ")}. ${expanded ? "Hide details" : "Show details"}.`} accessibilityState={{ expanded }} onPress={onToggle} style={{ minHeight: 52, flexDirection: compact ? "column" : "row", alignItems: compact ? "stretch" : "center", gap: compact ? 5 : 12, paddingHorizontal: compact ? 14 : 18, paddingVertical: 9 }}>
-      <Text style={{ ...textStyle(theme), fontWeight: "600", width: compact ? undefined : 110 }}>Plan {plan.id}</Text>
-      <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
-        <Text style={textStyle(theme, !plan.title)} numberOfLines={compact ? undefined : 2}>{plan.title ?? "Title not observed"}</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
-          {evidence.map((label) => <Text key={label} style={{ color: theme.colors.foregroundMuted, fontSize: 11, paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>{label}</Text>)}
-        </View>
-      </View>
-      <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{plan.wave === null ? "Wave not recorded" : `Wave ${plan.wave}`} · {expanded ? "Hide details" : "Show details"}</Text>
-    </Pressable>
-    {expanded && <View accessibilityLabel={`Plan ${phaseId}-${plan.number} details`} style={{ gap: 8, marginHorizontal: compact ? 14 : 18, marginBottom: 12, padding: 12, borderRadius: 8, backgroundColor: theme.colors.surface2 ?? theme.colors.surface0 }}>
-      <Text style={{ ...textStyle(theme), fontWeight: "600" }}>Plan evidence</Text>
-      <Text style={textStyle(theme, true)}>{plan.objective ?? "Objective not observed in the plan file."}</Text>
-      {(plan.title?.includes("[omitted]") || plan.objective?.includes("[omitted]")) && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Absolute paths and links are shown as [omitted].</Text>}
-      {plan.summaryObserved && <View style={{ gap: 4 }}>
-        <Text style={{ ...textStyle(theme), fontWeight: "600" }}>Summary, as recorded</Text>
-        <Text style={textStyle(theme, true)}>{plan.summaryExcerpt ?? (plan.summaryExcerptLimited ? "No safe summary introduction available." : "No introductory prose recorded before the next heading.")}</Text>
-        {plan.summaryExcerptLimited && plan.summaryExcerpt && <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Some summary wording was withheld or shortened for safe display.</Text>}
-      </View>}
-      <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>Roadmap checkmarks and observed summaries are separate facts; neither proves verification.</Text>
-    </View>}
-  </View>;
-}
+/** What a plan's files show: a summary written, a plan file only, or only a roadmap line. */
+export type PlanState = "summary" | "planned" | "listed";
+export const planState = (plan: Plan): PlanState => plan.summaryObserved ? "summary" : plan.planObserved ? "planned" : "listed";
+const PLAN_STATE_WORDS: Record<PlanState, string> = { summary: "summary", planned: "plan file", listed: "roadmap only" };
+const planColor = (theme: ThemeProps["theme"], state: PlanState) => state === "summary" ? toneColor(theme, "success") : state === "planned" ? theme.colors.foreground : tint(theme, theme.colors.foregroundMuted, 0.35);
+const planGlyph = (state: PlanState) => state === "summary" ? "✓" : state === "planned" ? "●" : "○";
 
-function PhaseGroup({ phase, expanded, onToggle, expandedPlanId, onTogglePlan, theme, compact }: { phase: Phase; expanded: boolean; onToggle(): void; expandedPlanId: string | null; onTogglePlan(id: string): void; theme: BoardTheme; compact: boolean }) {
-  const checked = phase.entries.filter((entry) => entry.roadmapChecked === true).length;
+/** A phase's plans as counted for its chip and bar: summaries, plan files without one, and the rest of the declared total. */
+export function phaseCounts(phase: Phase) {
   const summaries = phase.entries.filter((entry) => entry.summaryObserved).length;
-  const declared = phase.declaredPlans === null ? "total not confirmed" : `${phase.declaredPlans} declared`;
-  return <View style={{ minWidth: 0, borderRadius: 10, borderWidth: 1, borderColor: phase.current ? theme.colors.accent : theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <Pressable accessibilityRole="button" accessibilityLabel={`Phase ${phase.id}: ${phase.title}. ${phase.current ? "Current phase. " : ""}${checked} roadmap checked. ${declared}. ${summaries} summaries observed. ${expanded ? "Hide plans" : "Show plans"}.`} accessibilityState={{ expanded }} onPress={onToggle} style={{ minHeight: 56, padding: compact ? 14 : 18, flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "flex-start" : "center", gap: 8 }}>
-      <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
-        <Text style={{ ...textStyle(theme), fontWeight: "600", fontSize: 16 }}>Phase {phase.id} · {phase.title}{phase.current ? " · Current" : ""}</Text>
-        <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{checked} roadmap checked · {declared} · {summaries} summaries observed</Text>
-      </View>
-      <Text style={{ ...textStyle(theme), fontSize: 12, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}>{expanded ? "Hide plans  ⌃" : "Show plans  ⌄"}</Text>
-    </Pressable>
-    {expanded && <>
-      <PhaseChecks phase={phase} theme={theme} compact={compact} />
-      <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600", paddingHorizontal: compact ? 14 : 18, paddingVertical: 12 }}>Plans in this phase</Text>
-      {phase.entries.length ? <View role="list" accessibilityLabel={`Plans for phase ${phase.id}`}>
-        {phase.entries.map((entry) => <View key={entry.id} role="listitem"><PlanRow plan={entry} phaseId={phase.id} expanded={expandedPlanId === entry.id} onToggle={() => onTogglePlan(entry.id)} theme={theme} compact={compact} /></View>)}
-      </View> : <View style={{ padding: compact ? 14 : 18, borderTopWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}><Text style={textStyle(theme, true)}>No plan files or roadmap plan entries observed for this phase.</Text></View>}
-    </>}
+  const planned = phase.entries.filter((entry) => entry.planObserved && !entry.summaryObserved).length;
+  const total = Math.max(phase.declaredPlans ?? 0, phase.entries.length);
+  return { summaries, planned, rest: total - summaries - planned, total };
+}
+
+/** The plan the tab opens on: the selected phase's first plan without a summary, else its last. */
+export const defaultPlan = (phase: Phase | undefined) => phase?.entries.find((entry) => !entry.summaryObserved) ?? phase?.entries.at(-1) ?? null;
+
+function MilestoneBar({ plans, theme }: ThemeProps & { plans: Plans }) {
+  const unconfirmed = plans.phases.filter((phase) => phase.declaredPlans === null).length;
+  const counts = plans.phases.map(phaseCounts).reduce((sum, phase) => ({ summaries: sum.summaries + phase.summaries, planned: sum.planned + phase.planned, rest: sum.rest + phase.rest }), { summaries: 0, planned: 0, rest: 0 });
+  return <View style={{ gap: 10 }}>
+    <SegmentBar theme={theme} height={14} label={`${counts.summaries} plans with a summary, ${counts.planned} with a plan file only, ${counts.rest} declared or listed without a plan file`} segments={[
+      { label: "summary", value: counts.summaries, color: planColor(theme, "summary") },
+      { label: "planned", value: counts.planned, color: planColor(theme, "planned") },
+      { label: "listed", value: counts.rest, color: planColor(theme, "listed") },
+    ]} />
+    <Legend theme={theme} items={[
+      { color: planColor(theme, "summary"), label: `${counts.summaries} with a summary` },
+      ...(counts.planned ? [{ color: planColor(theme, "planned"), label: `${counts.planned} plan file only` }] : []),
+      ...(counts.rest ? [{ color: planColor(theme, "listed"), label: `${counts.rest} declared or listed, no plan file yet` }] : []),
+    ]} />
+    <Text style={{ ...text(theme, 12, "400", true), ...figures }}>{plural(plans.observedPlans, "plan file")} observed · {plural(plans.observedSummaries, "matching summary", "matching summaries")} observed{unconfirmed ? ` · ${plural(unconfirmed, "phase")} without a confirmed plan total` : ""}</Text>
   </View>;
 }
 
-export function PlansView({ state, onRefresh, theme, compact = false }: { state: BoardViewState; onRefresh(): void; theme: BoardTheme; compact?: boolean }) {
-  const [selected, setSelected] = useState<{ workspaceId: string; phaseId: string | null } | null>(null);
-  const [openPlan, setOpenPlan] = useState<{ workspaceId: string; id: string } | null>(null);
-  const plans = state.snapshot?.overview?.plans;
-  const defaultPhase = plans?.phases.find((phase) => phase.current)?.id ?? plans?.phases[0]?.id;
-  const selectedId = selected?.workspaceId === state.workspaceId && (selected.phaseId === null || plans?.phases.some((phase) => phase.id === selected.phaseId)) ? selected.phaseId : defaultPhase;
-  const expandedPlanId = openPlan?.workspaceId === state.workspaceId ? openPlan.id : null;
-  return <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: compact ? 16 : 24, paddingBottom: 32, gap: 20 }} nestedScrollEnabled>
-    <View style={{ flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "stretch" : "center", gap: 14 }}>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 24, lineHeight: 30, fontWeight: "600" }}>Plans</Text><Text style={textStyle(theme, true)}>Current-milestone plan files and roadmap annotations.</Text></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={state.busy ? "Refreshing plans" : "Refresh plans"} accessibilityState={{ disabled: state.busy, busy: state.busy }} disabled={state.busy} onPress={onRefresh} style={{ minHeight: 44, alignSelf: compact ? "flex-start" : "auto", justifyContent: "center", paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}><Text style={{ ...textStyle(theme), fontWeight: "500" }}>{state.busy ? "Refreshing…" : "Refresh"}</Text></Pressable>
+function Tile({ plan, selected, flash, onPress, theme }: ThemeProps & { plan: Plan; selected: boolean; flash: number | null; onPress(): void }) {
+  const state = planState(plan);
+  const color = planColor(theme, state);
+  const accent = toneColor(theme, "accent");
+  const warning = toneColor(theme, "warning");
+  const title = (plan.title ?? "title not observed").replace(/[.!?]+$/, "");
+  return <View role="listitem"><Flash signal={flash} color={accent} radius={12}>
+    <Pressable role="button" accessibilityState={{ selected }} {...(Platform.OS === "web" ? { "aria-pressed": selected } : {})} accessibilityLabel={`Plan ${plan.id}: ${title}. ${plan.wave === null ? "Wave not recorded" : `Wave ${plan.wave}`}. ${planEvidenceLabel(plan).join(". ")}.`} onPress={onPress}
+      // React Native Web reports hover to the style callback; native platforms never set it.
+      style={(pressable) => ({ width: 100, height: 64, padding: 9, justifyContent: "space-between", borderRadius: 12, backgroundColor: state === "summary" ? tint(theme, color, 0.16) : surface(theme, 2), borderWidth: selected || plan.roadmapConflict ? 2 : 1, borderColor: selected ? accent : plan.roadmapConflict ? warning : state === "listed" ? line(theme) : "transparent", borderStyle: state === "listed" || (plan.roadmapConflict && !selected) ? "dashed" : "solid", transform: [{ translateY: (pressable as { hovered?: boolean }).hovered ? -2 : 0 }] })}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
+        <Text numberOfLines={1} style={{ ...text(theme, 13, "700"), ...figures }}>{plan.id}</Text>
+        <Text style={{ ...text(theme, 12, "700"), color: state === "listed" ? theme.colors.foregroundMuted : color }}>{planGlyph(state)}</Text>
+      </View>
+      <Text numberOfLines={1} style={text(theme, 11, "500", true)}>{plan.roadmapConflict ? "roadmap conflict" : PLAN_STATE_WORDS[state]}</Text>
+    </Pressable>
+  </Flash></View>;
+}
+
+/** A phase's plans grouped by the wave their plan files record; plans without one come last. */
+export function planWaves(phase: Phase): { wave: number | null; plans: Plan[] }[] {
+  const waves = new Map<number | null, Plan[]>();
+  for (const plan of phase.entries) waves.set(plan.wave, [...waves.get(plan.wave) ?? [], plan]);
+  return [...waves.entries()].sort(([left], [right]) => left === null ? 1 : right === null ? -1 : left - right).map(([wave, plans]) => ({ wave, plans }));
+}
+
+function WaveGroup({ wave, plans, selected, flash, onSelect, theme }: ThemeProps & { wave: number | null; plans: readonly Plan[]; selected: string | null; flash(id: string): number | null; onSelect(id: string): void }) {
+  const summaries = plans.filter((plan) => plan.summaryObserved).length;
+  const finished = summaries === plans.length;
+  return <View style={{ gap: 6 }}>
+    <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+      <Text role="heading" style={{ ...text(theme, 15, "700"), ...figures, color: finished ? toneColor(theme, "success") : theme.colors.foreground }}>{wave === null ? "No wave" : `W${wave}`}</Text>
+      <Text style={{ ...text(theme, 11, "400", true), ...figures }}>{summaries}/{plans.length}</Text>
     </View>
-    {state.busy && !state.snapshot ? <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>Loading plans…</Text> : <>
-      {state.error && <Text role="alert" style={textStyle(theme)}>Could not refresh plans. {state.snapshot ? "The last snapshot is still displayed." : "Try refreshing again."}</Text>}
-      {(state.snapshot?.freshness === "stale" || state.snapshot?.freshness === "refresh-failed") && <Text style={textStyle(theme, true)}>Planning files may have changed. Refresh to update plans.</Text>}
-      {state.refreshAnnouncement && <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>{state.refreshAnnouncement}</Text>}
-      {plans?.availability === "available" ? <>
-        <View style={{ flexDirection: compact ? "column" : "row", gap: 12 }}>
-          {[{ label: "Plan files observed", value: plans.observedPlans }, { label: "Matching summaries observed", value: plans.observedSummaries }].map((fact) => <View key={fact.label} style={{ flex: 1, minWidth: 0, gap: 4, padding: 16, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted, backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}><Text style={{ ...textStyle(theme), fontSize: 22, fontWeight: "600" }}>{fact.value}</Text><Text style={{ ...textStyle(theme, true), fontSize: 12 }}>{fact.label}</Text></View>)}
-        </View>
-        <Text style={{ ...textStyle(theme, true), fontSize: 12 }}>A summary file is observed evidence, not a verified completion.</Text>
-        {plans.limited && <Text role="alert" style={textStyle(theme, true)}>Some plan or summary evidence could not be fully read; counts may be partial.</Text>}
-        {plans.phases.length ? plans.phases.map((phase) => <PhaseGroup key={phase.id} phase={phase} expanded={phase.id === selectedId} onToggle={() => setSelected({ workspaceId: state.workspaceId, phaseId: selectedId === phase.id ? null : phase.id })} expandedPlanId={expandedPlanId} onTogglePlan={(id) => setOpenPlan(expandedPlanId === id ? null : { workspaceId: state.workspaceId, id })} theme={theme} compact={compact} />) : <Text style={textStyle(theme, true)}>No phases declared in this milestone.</Text>}
-      </> : <View style={{ padding: 20, gap: 6, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border ?? theme.colors.foregroundMuted }}><Text style={textStyle(theme)}>Plans unavailable</Text><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></View>}
-    </>}
-  </ScrollView>;
+    <View role="list" accessibilityLabel={wave === null ? "Plans without a recorded wave" : `Plans in wave ${wave}, ${summaries} of ${plans.length} with a summary`} style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+      {plans.map((plan) => <Tile key={plan.id} plan={plan} selected={selected === plan.id} flash={flash(plan.id)} onPress={() => onSelect(plan.id)} theme={theme} />)}
+    </View>
+  </View>;
+}
+
+const evidenceTone = (label: string): Tone => label === "Conflicting roadmap checkmarks" ? "warning" : /^(Roadmap checked|Plan file observed|Summary observed)$/.test(label) ? "success" : "neutral";
+
+function PlanDetail({ plan, theme }: ThemeProps & { plan: Plan }) {
+  const omitted = plan.title?.includes("[omitted]") || plan.objective?.includes("[omitted]");
+  return <View accessibilityLabel={`Plan ${plan.id} details`} style={{ gap: 10, padding: 16, borderRadius: 14, backgroundColor: surface(theme, 2) }}>
+    <View style={{ gap: 4 }}>
+      <Text style={kicker(theme)}>{[`Plan ${plan.id}`, plan.wave === null ? "wave not recorded" : `wave ${plan.wave}`].join(" · ")}</Text>
+      <Text role="heading" style={text(theme, 16, "600", !plan.title)}>{plan.title ?? "Title not observed"}</Text>
+    </View>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{planEvidenceLabel(plan).map((label) => <Pill key={label} theme={theme} tone={evidenceTone(label)} label={label} />)}</View>
+    <Text style={text(theme, 13, "400", !plan.objective)}>{plan.objective ?? "Objective not observed in the plan file."}</Text>
+    {plan.summaryObserved && <View style={{ gap: 4, paddingLeft: 12, borderLeftWidth: 2, borderColor: toneColor(theme, "success") }}>
+      <Text style={kicker(theme)}>Summary, as recorded</Text>
+      <Text style={text(theme, 13, "400", true)}>{plan.summaryExcerpt ?? (plan.summaryExcerptLimited ? "No safe summary introduction available." : "No introductory prose recorded before the next heading.")}</Text>
+      {plan.summaryExcerptLimited && plan.summaryExcerpt && <Text style={smallStyle(theme)}>Some summary wording was withheld or shortened for safe display.</Text>}
+    </View>}
+    {omitted && <Text style={smallStyle(theme)}>Absolute paths and links are shown as [omitted].</Text>}
+  </View>;
+}
+
+function PlanRow({ plan, theme, compact }: ThemeProps & { plan: Plan; compact: boolean }) {
+  return <View role="listitem" style={{ flexDirection: compact ? "column" : "row", gap: compact ? 5 : 12, paddingVertical: 10, borderTopWidth: 1, borderColor: borderColor(theme) }}>
+    <Text style={{ ...textStyle(theme), fontWeight: "600", width: compact ? undefined : 90 }}><Text style={{ color: planColor(theme, planState(plan)) }}>{planGlyph(planState(plan))}</Text>  {plan.id}</Text>
+    <View style={{ flex: 1, minWidth: 0, gap: 5 }}>
+      <Text style={textStyle(theme, !plan.title)}>{plan.title ?? "Title not observed"}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+        {[plan.wave === null ? "Wave not recorded" : `Wave ${plan.wave}`, ...planEvidenceLabel(plan)].map((label) => <Badge key={label} label={label} theme={theme} attention={label === "Conflicting roadmap checkmarks"} />)}
+      </View>
+    </View>
+  </View>;
+}
+
+function PhasePanel({ phase, view, onView, selected, flash, onSelect, theme, compact }: ThemeProps & { phase: Phase; view: "tiles" | "list"; onView(view: "tiles" | "list"): void; selected: Plan | null; flash(id: string): number | null; onSelect(id: string): void; compact: boolean }) {
+  const { summaries, total } = phaseCounts(phase);
+  return <Section theme={theme} overline={`Phase ${phase.id}${phase.current ? " · current" : ""}`} title={phase.title} gap={16}
+    aside={<Text style={{ ...text(theme, 13, "600", true), ...figures }}>{total ? `${summaries} of ${plural(total, "plan")} with a summary · ${phase.entries.filter((entry) => entry.roadmapChecked === true).length} roadmap checked${phase.declaredPlans === null ? " · total not confirmed" : ""}` : "No plans declared yet"}</Text>}>
+    <PhaseChecks phase={phase} theme={theme} compact={compact} />
+    <View style={{ gap: 4 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, paddingBottom: 6 }}>
+        <Text style={kicker(theme)}>Plans in this phase</Text>
+        {phase.entries.length > 0 && <Toggle<"tiles" | "list"> theme={theme} label="Show plans as" value={view} onChange={onView} options={[{ value: "tiles", label: "Tiles" }, { value: "list", label: "List" }]} />}
+      </View>
+      {!phase.entries.length ? <Text style={text(theme, 13, "400", true)}>No plan files or roadmap plan entries observed for this phase.</Text>
+        : view === "list" ? <View role="list" accessibilityLabel={`Plans for phase ${phase.id}`}>{phase.entries.map((plan) => <PlanRow key={plan.id} plan={plan} theme={theme} compact={compact} />)}</View>
+        : <>
+          {selected && <PlanDetail plan={selected} theme={theme} />}
+          <View style={{ marginTop: 6, flexDirection: "row", flexWrap: "wrap", columnGap: 18, rowGap: 14 }}>{planWaves(phase).map((wave) => <WaveGroup key={wave.wave ?? "none"} wave={wave.wave} plans={wave.plans} selected={selected?.id ?? null} flash={flash} onSelect={onSelect} theme={theme} />)}</View>
+        </>}
+    </View>
+  </Section>;
+}
+
+/** The caveats behind the plans tab. */
+export const plansNotes = () => [
+  "A summary file is observed evidence, not a verified completion.",
+  "Roadmap checkmarks and observed summaries are separate facts; neither proves verification.",
+  "Stages come from the files each stage leaves; an observed file is not a passed gate. A stage without its file before an observed one reads as skipped.",
+];
+
+export function PlansView({ state, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; onRefresh(): void; compact?: boolean }) {
+  const [picked, setPicked] = useState<{ workspaceId: string; phaseId: string; planId: string | null } | null>(null);
+  const [view, setView] = useState<"tiles" | "list">("tiles");
+  const plans = state.snapshot?.overview?.plans;
+  const mine = picked?.workspaceId === state.workspaceId ? picked : null;
+  const phase = plans?.phases.find((entry) => entry.id === mine?.phaseId) ?? plans?.phases.find((entry) => entry.current) ?? plans?.phases[0];
+  const selected = phase?.entries.find((entry) => mine?.phaseId === phase.id && entry.id === mine.planId) ?? defaultPlan(phase);
+  const changes = state.changes;
+  const flash = (id: string) => changes && Date.now() - changes.at < FLASH_MS && changes.tasks.includes(id) ? changes.at : null;
+  return <BoardFrame title="Plans" description="The current milestone's phases, the stages each has left files for, and its plans wave by wave." subject="plans" state={state} onRefresh={onRefresh} theme={theme} compact={compact}
+    alerts={plans?.limited ? ["Some plan or summary evidence could not be fully read; counts may be partial."] : []} notes={plansNotes()}>
+    {plans?.availability === "available" ? <>
+      <MilestoneBar plans={plans} theme={theme} />
+      {plans.phases.length ? <>
+        <PhasePicker label="Phases" selected={phase?.id ?? null} onSelect={(id) => setPicked({ workspaceId: state.workspaceId, phaseId: id, planId: null })} theme={theme} phases={plans.phases.map((entry) => {
+          const { summaries, total } = phaseCounts(entry);
+          const confirmed = entry.declaredPlans !== null;
+          return { id: entry.id, current: entry.current, tone: confirmed && total > 0 && summaries >= total ? "success" : null, detail: `${summaries}/${total || "?"}${confirmed || !total ? "" : " · total TBD"}`, percent: total ? summaries / total * 100 : 0,
+            description: `${entry.title}. ${summaries} of ${total || "no"} plans with a summary${confirmed || !total ? "" : "; the total is not confirmed"}.` };
+        })} />
+        {phase && <PhasePanel phase={phase} view={view} onView={setView} selected={selected} flash={flash} onSelect={(id) => setPicked({ workspaceId: state.workspaceId, phaseId: phase.id, planId: id })} theme={theme} compact={compact} />}
+      </> : <Text style={textStyle(theme, true)}>No phases declared in this milestone.</Text>}
+    </> : <Card title="Plans unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></Card>}
+  </BoardFrame>;
 }

@@ -3,7 +3,8 @@ import { Pressable, Text, View } from "react-native";
 import type { BoardPath, PathMilestone } from "../shared/path.js";
 import type { UsageSlot } from "../shared/usage.js";
 import type { BoardViewState } from "./board-components.js";
-import { PathFrame, plural, SetupNotice, TaskBar, tokenLabel, warningAlerts, type ThemeProps } from "./path-components.js";
+import { BoardFrame, plural, tokenLabel, type ThemeProps } from "./board-frame.js";
+import { SetupNotice, TaskBar, warningAlerts } from "./path-components.js";
 import { usageAlerts, usageNotice } from "./path-usage-components.js";
 import type { UsageViewState } from "./usage-controller.js";
 import { integer, money, slotSummary, tokens } from "./usage-format.js";
@@ -102,7 +103,7 @@ export function PathRoadmapView({ state, usage, onRefresh, theme, compact = fals
   const slots = new Map((usage.usage?.availability === "available" ? usage.usage.milestones : []).map((slot) => [slot.id, slot]));
   const maxCost = Math.max(0, ...[...slots.values()].map((slot) => slot.cost ?? 0));
   const total = usage.usage?.availability === "available" ? usage.usage.totals : null;
-  return <PathFrame title="Roadmap" description="The whole program: what shipped, where it stands, and what comes next." subject="roadmap" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={[...warningAlerts(path, (warning) => warning.startsWith("roadmap-") || warning === "milestone-not-in-roadmap"), ...usageAlerts(usage)]} notes={roadmapNotes(usage)}>
+  return <BoardFrame title="Roadmap" description="The whole program: what shipped, where it stands, and what comes next." subject="roadmap" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={[...warningAlerts(path, (warning) => warning.startsWith("roadmap-") || warning === "milestone-not-in-roadmap"), ...usageAlerts(usage)]} notes={roadmapNotes(usage)}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : roadmap?.availability === "available" ? <>
       <Section theme={theme} gap={12}>
         <View style={{ flexDirection: compact ? "column" : "row", alignItems: compact ? "flex-start" : "baseline", gap: 12 }}>
@@ -119,5 +120,5 @@ export function PathRoadmapView({ state, usage, onRefresh, theme, compact = fals
       <Text style={text(theme, 13, "400", true)}>{roadmap?.availability === "absent" ? "This project runs one milestone at a time; no program roadmap is recorded." : "The roadmap could not be read."}</Text>
       {roadmap?.availability === "absent" && total ? <Text style={{ ...text(theme, 14, "600"), ...figures }}>{money(total.cost)} · {integer(total.turns)} turns in this workspace</Text> : null}
     </Section>}
-  </PathFrame>;
+  </BoardFrame>;
 }

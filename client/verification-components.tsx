@@ -1,20 +1,19 @@
 import { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import type { BoardUatPhase } from "../shared/uat.js";
 import { VERIFICATION_ROW_KINDS, type BoardVerificationPhase, type VerificationCheckTable, type VerificationRowKind, type VerificationRowStatus, type VerificationTruthTable } from "../shared/verification.js";
 import type { BoardTheme, BoardViewState } from "./board-components.js";
+import { BoardFrame, borderColor, Card, plural, smallStyle, textStyle, type ThemeProps } from "./board-frame.js";
+import { PhaseHeading, PhasePicker } from "./core-components.js";
 import { defaultPhase } from "./uat-components.js";
+import { Legend, SegmentBar, Stat, surface, tint, toneColor } from "./ui-kit.js";
 
 type Counts = VerificationTruthTable["counts"];
 
-const textStyle = (theme: BoardTheme, muted = false) => ({ color: muted ? theme.colors.foregroundMuted : theme.colors.foreground, fontSize: 14, lineHeight: 21, flexShrink: 1 });
-const smallStyle = (theme: BoardTheme, muted = true) => ({ ...textStyle(theme, muted), fontSize: 12, lineHeight: 18 });
-const border = (theme: BoardTheme) => theme.colors.border ?? theme.colors.foregroundMuted;
+const border = borderColor;
 export const ROW_LABELS: Record<VerificationRowKind, string> = { verified: "Verified", failed: "Failed", partial: "Partial", unverified: "Behavior unverified", human: "Needs human", pending: "Pending", uncertain: "Uncertain", override: "Override", deferred: "Deferred", other: "Unclassified" };
 /** Row states a reader should look at: anything recorded as neither verified, overridden, deferred nor unclassified. */
 const ATTENTION_KINDS = ["failed", "partial", "unverified", "human", "pending", "uncertain"] as const satisfies readonly VerificationRowKind[];
-const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 const isAre = (count: number) => count === 1 ? "is" : "are";
 
 function rowColor(kind: VerificationRowKind, theme: BoardTheme): string {
@@ -63,15 +62,8 @@ export function phaseSummary(phase: BoardVerificationPhase): { text: string; att
   return { text: parts.filter(Boolean).join(" · "), attention };
 }
 
-function Card({ title, subtitle, children, theme }: { title: string; subtitle?: string; children: React.ReactNode; theme: BoardTheme }) {
-  return <View style={{ minWidth: 0, padding: 16, gap: 10, borderRadius: 10, borderWidth: 1, borderColor: border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <View style={{ gap: 2 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 16, fontWeight: "600" }}>{title}</Text>{subtitle && <Text style={smallStyle(theme)}>{subtitle}</Text>}</View>
-    {children}
-  </View>;
-}
-
 function Badge({ label, color, theme }: { label: string; color: string; theme: BoardTheme }) {
-  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, borderWidth: 1, borderColor: border(theme) }}>
+  return <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, backgroundColor: tint(theme, color, 0.12) }}>
     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
     <Text style={{ ...smallStyle(theme, false), fontWeight: "600" }}>{label}</Text>
   </View>;
@@ -95,17 +87,20 @@ function Field({ label, value, theme }: { label: string; value: string | null; t
   return <Text style={textStyle(theme, true)}><Text style={{ ...textStyle(theme), fontWeight: "600" }}>{label}: </Text>{value}</Text>;
 }
 
-function Toggle({ open, label, onPress, theme }: { open: boolean; label: string; onPress(): void; theme: BoardTheme }) {
-  return <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`} accessibilityState={{ expanded: open }} {...(Platform.OS === "web" ? { "aria-expanded": open } : {})} onPress={onPress} style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 12, borderRadius: 7, borderWidth: 1, borderColor: border(theme) }}>
-    <Text style={textStyle(theme)}>{open ? `Hide ${label}` : `Show ${label}`}</Text>
+function ShowToggle({ open, label, onPress, theme }: { open: boolean; label: string; onPress(): void; theme: BoardTheme }) {
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Hide" : "Show"} ${label}`} accessibilityState={{ expanded: open }} {...(Platform.OS === "web" ? { "aria-expanded": open } : {})} onPress={onPress} style={{ minHeight: 36, justifyContent: "center", alignSelf: "flex-start", paddingHorizontal: 14, borderRadius: 999, backgroundColor: surface(theme, 2) }}>
+    <Text style={{ ...textStyle(theme), fontSize: 13, fontWeight: "500" }}>{open ? `Hide ${label}` : `Show ${label}`}</Text>
   </Pressable>;
 }
 
-function Fact({ label, value, detail, attention, theme }: { label: string; value: string; detail?: string | null; attention?: boolean; theme: BoardTheme }) {
-  return <View accessible accessibilityLabel={`${label}: ${value}${detail ? `. ${detail}` : ""}`} style={{ flexGrow: 1, flexBasis: 180, minWidth: 0, padding: 12, gap: 4, borderRadius: 8, borderWidth: 1, borderColor: attention ? theme.colors.statusWarning ?? theme.colors.accent : border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}>
-    <Text style={smallStyle(theme)}>{label}</Text>
-    <Text style={{ ...textStyle(theme), fontWeight: "600" }}>{value}</Text>
-    {detail && <Text style={smallStyle(theme)}>{detail}</Text>}
+const barColor = (kind: VerificationRowKind, theme: BoardTheme) => kind === "pending" || kind === "deferred" || kind === "other" ? tint(theme, theme.colors.foregroundMuted, 0.35) : kind === "override" ? tint(theme, toneColor(theme, "success"), 0.5) : rowColor(kind, theme);
+
+/** A truth table's rows as one bar, by recorded state. */
+function TruthBar({ counts, theme }: ThemeProps & { counts: Counts }) {
+  const present = VERIFICATION_ROW_KINDS.filter((kind) => counts[kind] > 0);
+  return <View style={{ gap: 8 }}>
+    <SegmentBar theme={theme} height={12} label={present.map((kind) => `${counts[kind]} ${ROW_LABELS[kind].toLowerCase()}`).join(", ") || "No rows"} segments={VERIFICATION_ROW_KINDS.map((kind) => ({ label: kind, value: counts[kind], color: barColor(kind, theme) }))} />
+    <Legend theme={theme} items={present.map((kind) => ({ color: barColor(kind, theme), label: `${counts[kind]} ${ROW_LABELS[kind].toLowerCase()}` }))} />
   </View>;
 }
 
@@ -139,9 +134,10 @@ function TruthCard({ table, phaseId, theme, compact, open, onToggle, primary }: 
   // The phase's own truths are always listed; further tables (plan must-haves) stay collapsed.
   const rows = primary || open ? table.rows : table.rows.filter(needsReading);
   return <Card title={table.title} subtitle={truthCountsText(table)} theme={theme}>
+    {table.rowCount > 0 && <TruthBar counts={table.counts} theme={theme} />}
     {withheldRows > 0 && <Text style={smallStyle(theme)}>Showing {table.rows.length} of {table.rowCount} rows within the excerpt limit; counts cover every row.</Text>}
     {rows.map((row, index) => <TruthItem key={index} row={row} textLabel={table.textLabel} first={index === 0} showEvidence={needsReading(row) || open} theme={theme} compact={compact} />)}
-    {(primary ? verified.some((row) => row.evidence) : verified.length > 0) && <Toggle open={open} label={primary ? `evidence for ${plural(verified.length, "verified truth")} in phase ${phaseId}` : `${plural(verified.length, "verified row")} in ${table.title}`} onPress={onToggle} theme={theme} />}
+    {(primary ? verified.some((row) => row.evidence) : verified.length > 0) && <ShowToggle open={open} label={primary ? `evidence for ${plural(verified.length, "verified truth")} in phase ${phaseId}` : `${plural(verified.length, "verified row")} in ${table.title}`} onPress={onToggle} theme={theme} />}
   </Card>;
 }
 
@@ -162,7 +158,7 @@ function CheckBlock({ check, first, theme, open, onToggle }: { check: Verificati
   return <Entry first={first} theme={theme}>
     <Text style={{ ...textStyle(theme), fontWeight: "600" }}>{check.title}</Text>
     <Text style={smallStyle(theme)}>{checkSummary(check)}</Text>
-    {listedAll && check.rows.length > 0 && <Toggle open={open} label={`${plural(check.rows.length, "row")} in ${check.title}`} onPress={onToggle} theme={theme} />}
+    {listedAll && check.rows.length > 0 && <ShowToggle open={open} label={`${plural(check.rows.length, "row")} in ${check.title}`} onPress={onToggle} theme={theme} />}
     {listedAll && open && check.rows.length < check.rowCount && <Text style={smallStyle(theme)}>Showing {check.rows.length} of {check.rowCount} rows within the excerpt limit; rows needing attention come first.</Text>}
     {(!listedAll || open) && check.rows.map((row, index) => <View key={index} style={{ gap: 4, paddingLeft: 12, borderLeftWidth: 2, borderColor: border(theme) }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
@@ -180,7 +176,7 @@ function CheckBlock({ check, first, theme, open, onToggle }: { check: Verificati
 }
 
 function PhaseVerification({ phase, uat, theme, compact, isOpen, onToggle }: { phase: BoardVerificationPhase; uat: BoardUatPhase | undefined; theme: BoardTheme; compact: boolean; isOpen(key: string): boolean; onToggle(key: string): void }) {
-  if (phase.observation !== "observed") return <Card title={`Phase ${phase.id} · ${phase.title}`} theme={theme}>
+  if (phase.observation !== "observed") return <Card title={`Phase ${phase.id} · ${phase.title}`} source="VERIFICATION.md" theme={theme} attention={phase.observation === "unavailable"}>
     <Text style={textStyle(theme, true)}>{phase.observation === "unavailable" ? "VERIFICATION.md could not be read safely for this phase." : "No VERIFICATION.md observed for this phase yet."}</Text>
   </Card>;
   const key = (name: string) => `${phase.id}:${name}`;
@@ -195,21 +191,22 @@ function PhaseVerification({ phase, uat, theme, compact, isOpen, onToggle }: { p
     phase.otherFields.length ? `Other header fields, not interpreted: ${phase.otherFields.join(", ")}.` : null,
   ].filter((line): line is string => !!line);
   return <View style={{ gap: 16 }}>
-    <View style={{ gap: 5 }}>
-      <Text role="heading" style={{ ...textStyle(theme), fontSize: 19, lineHeight: 25, fontWeight: "600" }}>Phase {phase.id} · {phase.title}</Text>
-      <Text style={smallStyle(theme)}>VERIFICATION.md observed{phase.verifiedAt ? ` · Verified ${phase.verifiedAt}` : ""}{phase.disposedAt ? ` · Disposed ${phase.disposedAt}` : ""}</Text>
-      <Text style={smallStyle(theme)}>Results are recorded in the report; they are not a live check.</Text>
+    <PhaseHeading theme={theme} source="VERIFICATION.md" id={phase.id} title={phase.title} facts={["VERIFICATION.md observed", phase.verifiedAt ? `Verified ${phase.verifiedAt}` : null, phase.disposedAt ? `Disposed ${phase.disposedAt}` : null]} />
+    {(JSON.stringify(phase).includes("[omitted]") || phase.excerptsLimited) && <View style={{ gap: 2 }}>
       {JSON.stringify(phase).includes("[omitted]") && <Text style={smallStyle(theme)}>Commands, absolute paths, links and host-like text are shown as [omitted].</Text>}
       {phase.excerptsLimited && <Text role="alert" style={smallStyle(theme)}>Some verification text could not be safely extracted or was shortened.</Text>}
-    </View>
+    </View>}
+    {verified !== null && total !== null && total > 0 && <SegmentBar theme={theme} height={14} label={`${verified} of ${total} verified`} segments={[
+      { label: "verified", value: verified, color: toneColor(theme, "success") }, { label: "not verified", value: total - verified, color: toneColor(theme, "warning") },
+    ]} />}
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
-      <Fact label="Recorded status" value={phase.recordedStatus ?? "Not recorded"} detail={again ? `Re-verified; previously ${again.previousStatus ?? "not recorded"}${again.previousScore ? ` (${again.previousScore})` : ""}` : null} attention={phase.statusKind !== "passed"} theme={theme} />
-      <Fact label="Score" value={verified !== null && total !== null ? `${verified} of ${total} verified` : scoreText ?? "Not recorded"} detail={verified !== null ? scoreText : null} attention={verified !== null && total !== null && verified < total} theme={theme} />
-      <Fact label="Truths" value={truths ? `${truths.counts.verified} of ${truths.rowCount} verified` : "No truth table found"} detail={truths ? `${breakdown(truths.counts) || "Every row is recorded as verified"} (${truths.title}).` : null} attention={!!truths && ATTENTION_KINDS.some((kind) => truths.counts[kind] > 0)} theme={theme} />
-      <Fact label="Gaps" value={phase.gapCount ? `${phase.gapCount} recorded · ${phase.openGapCount} open` : "None recorded"} attention={phase.openGapCount > 0} theme={theme} />
-      <Fact label="Human checks" value={phase.humanCount ? `${phase.humanCount} recorded · ${phase.openHumanCount} unresolved` : "None recorded"} detail={[phase.humanClosed ? `Closed${phase.humanClosed.date ? ` ${phase.humanClosed.date}` : ""}` : null, phase.recordedHumanCount ? `${phase.recordedHumanCount} with an unclassified outcome` : null].filter(Boolean).join(" · ") || null} attention={phase.openHumanCount > 0} theme={theme} />
+      <Stat theme={theme} size={18} label="Recorded status" value={phase.recordedStatus ?? "Not recorded"} detail={again ? `Re-verified; previously ${again.previousStatus ?? "not recorded"}${again.previousScore ? ` (${again.previousScore})` : ""}` : null} tone={phase.statusKind === "passed" ? "success" : phase.statusKind === "gaps_found" ? "danger" : "warning"} />
+      <Stat theme={theme} size={18} label="Score" value={verified !== null && total !== null ? `${verified} of ${total} verified` : scoreText ?? "Not recorded"} detail={verified !== null ? scoreText : null} tone={verified !== null && total !== null && verified < total ? "warning" : undefined} />
+      <Stat theme={theme} size={18} label="Truths" value={truths ? `${truths.counts.verified} of ${truths.rowCount} verified` : "No truth table found"} detail={truths ? `${breakdown(truths.counts) || "Every row is recorded as verified"} (${truths.title}).` : null} tone={!!truths && ATTENTION_KINDS.some((kind) => truths.counts[kind] > 0) ? "warning" : undefined} />
+      <Stat theme={theme} size={18} label="Gaps" value={phase.gapCount ? `${phase.gapCount} recorded · ${phase.openGapCount} open` : "None recorded"} tone={phase.openGapCount > 0 ? "danger" : undefined} />
+      <Stat theme={theme} size={18} label="Human checks" value={phase.humanCount ? `${phase.humanCount} recorded · ${phase.openHumanCount} unresolved` : "None recorded"} detail={[phase.humanClosed ? `Closed${phase.humanClosed.date ? ` ${phase.humanClosed.date}` : ""}` : null, phase.recordedHumanCount ? `${phase.recordedHumanCount} with an unclassified outcome` : null].filter(Boolean).join(" · ") || null} tone={phase.openHumanCount > 0 ? "warning" : undefined} />
     </View>
-    {notes.length > 0 && <View style={{ gap: 4 }}>{notes.map((note) => <Text key={note} role="alert" style={smallStyle(theme, false)}>{note}</Text>)}</View>}
+    {notes.length > 0 && <View style={{ gap: 4 }}>{notes.map((note) => <Text key={note} role="alert" style={{ ...smallStyle(theme, false), color: toneColor(theme, "warning") }}>{note}</Text>)}</View>}
     {!!truths?.counts.other && <Text style={smallStyle(theme, false)}>{plural(truths.counts.other, "truth row")} {isAre(truths.counts.other)} recorded with wording this tab does not classify; read {truths.counts.other === 1 ? "it" : "them"} below.</Text>}
 
     {(phase.gapCount > 0 || phase.gapsSummary) && <Card title="Gaps" subtitle={phase.gapCount ? `${plural(phase.gapCount, "gap")} recorded · ${phase.openGapCount} open${phase.gaps.length < phase.gapCount ? ` · showing ${phase.gaps.length}` : ""}` : "None recorded in the header"} theme={theme}>
@@ -287,7 +284,7 @@ function PhaseVerification({ phase, uat, theme, compact, isOpen, onToggle }: { p
     {also.length > 0 && <Card title="Also recorded" theme={theme}>{also.map((line) => <Text key={line} style={textStyle(theme, true)}>{line}</Text>)}</Card>}
 
     {phase.otherSections.length > 0 && <Card title="Other document sections" theme={theme}>
-      <Toggle open={isOpen(key("sections"))} label={`other sections for phase ${phase.id}`} onPress={() => onToggle(key("sections"))} theme={theme} />
+      <ShowToggle open={isOpen(key("sections"))} label={`other sections for phase ${phase.id}`} onPress={() => onToggle(key("sections"))} theme={theme} />
       {isOpen(key("sections")) && <View style={{ gap: 12 }}>
         <Text style={smallStyle(theme)}>Short safe excerpts in source order; not the full VERIFICATION.md.</Text>
         {phase.otherSections.map((section, index) => <View key={index} style={{ gap: 4 }}><Text style={{ ...textStyle(theme), fontWeight: "600" }}>{section.title}</Text>
@@ -297,7 +294,13 @@ function PhaseVerification({ phase, uat, theme, compact, isOpen, onToggle }: { p
   </View>;
 }
 
-export function VerificationView({ state, onRefresh, theme, compact = false }: { state: BoardViewState; onRefresh(): void; theme: BoardTheme; compact?: boolean }) {
+/** The caveats behind the verification tab. */
+export const verificationNotes = () => [
+  "Results are recorded in the report; they are not a live check.",
+  "Verification is per phase, so nothing is aggregated across phases. Disagreements are facts of the same report that do not match; the report is not re-judged.",
+];
+
+export function VerificationView({ state, onRefresh, theme, compact = false }: ThemeProps & { state: BoardViewState; onRefresh(): void; compact?: boolean }) {
   const [selection, setSelection] = useState<{ workspaceId: string; phaseId: string } | null>(null);
   const [open, setOpen] = useState<{ workspaceId: string; keys: string[] }>({ workspaceId: "", keys: [] });
   const verification = state.snapshot?.overview?.verification;
@@ -308,35 +311,22 @@ export function VerificationView({ state, onRefresh, theme, compact = false }: {
   const current = verification?.phases.find((phase) => phase.current);
   const isOpen = (key: string) => open.workspaceId === state.workspaceId && open.keys.includes(key);
   const toggle = (key: string) => setOpen({ workspaceId: state.workspaceId, keys: isOpen(key) ? open.keys.filter((item) => item !== key) : [...(open.workspaceId === state.workspaceId ? open.keys : []), key] });
-  return <ScrollView style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ padding: compact ? 16 : 24, paddingBottom: 32, gap: 18 }} nestedScrollEnabled>
-    <View style={{ flexDirection: compact ? "column" : "row", justifyContent: "space-between", alignItems: compact ? "stretch" : "center", gap: 14 }}>
-      <View style={{ flex: 1, minWidth: 0, gap: 4 }}><Text role="heading" style={{ ...textStyle(theme), fontSize: 24, lineHeight: 30, fontWeight: "600" }}>Verification</Text><Text style={textStyle(theme, true)}>Goal-backward verification recorded for each current-milestone phase.</Text></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={state.busy ? "Refreshing verification" : "Refresh verification"} accessibilityState={{ disabled: state.busy, busy: state.busy }} disabled={state.busy} onPress={onRefresh} style={{ minHeight: 44, alignSelf: compact ? "flex-start" : "auto", justifyContent: "center", paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: border(theme), backgroundColor: theme.colors.surface1 ?? theme.colors.surface0 }}><Text style={textStyle(theme)}>{state.busy ? "Refreshing…" : "Refresh"}</Text></Pressable>
-    </View>
-    {state.busy && !state.snapshot ? <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>Loading verification…</Text> : <>
-      {state.error && <Text role="alert" style={textStyle(theme)}>Could not refresh verification. {state.snapshot ? "The last snapshot is still displayed." : "Try refreshing again."}</Text>}
-      {(state.snapshot?.freshness === "stale" || state.snapshot?.freshness === "refresh-failed") && <Text style={textStyle(theme, true)}>Planning files may have changed. Refresh to update verification.</Text>}
-      {state.refreshAnnouncement && <Text accessibilityLiveRegion="polite" style={textStyle(theme, true)}>{state.refreshAnnouncement}</Text>}
-      {verification?.availability === "available" ? <>
-        {verification.limited && <Text role="alert" style={smallStyle(theme)}>Some verification evidence or safe excerpts may be incomplete.</Text>}
-        {verification.phases.length > 0 ? <>
-          <View accessibilityLabel="Verification phases" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-            {verification.phases.map((phase) => {
-              const summary = phaseSummary(phase);
-              const isSelected = phase.id === selectedId;
-              return <Pressable key={phase.id} accessibilityRole="button" accessibilityLabel={`Phase ${phase.id}${phase.current ? ", current" : ""}: ${summary.text}`} accessibilityState={{ selected: isSelected }} {...(Platform.OS === "web" ? { "aria-pressed": isSelected } : {})} onPress={() => setSelection({ workspaceId: state.workspaceId, phaseId: phase.id })} style={{ minHeight: 44, justifyContent: "center", gap: 1, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 7, borderWidth: 1, borderColor: isSelected ? theme.colors.accent : border(theme), backgroundColor: isSelected ? theme.colors.surface2 ?? theme.colors.surface0 : theme.colors.surface1 ?? theme.colors.surface0 }}>
-                <Text style={{ ...textStyle(theme), fontWeight: isSelected ? "600" : "400" }}>Phase {phase.id}{phase.current ? " · Current" : ""}</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  {summary.attention && <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: theme.colors.statusWarning ?? theme.colors.accent }} />}
-                  <Text style={smallStyle(theme)}>{summary.text}</Text>
-                </View>
-              </Pressable>;
-            })}
-          </View>
-          {!chosen && fallback.fallback && current?.observation === "not_observed" && selected && <Text style={smallStyle(theme)}>Phase {current.id} (current) has no verification report yet; showing Phase {selected.id}, the most recent phase with one.</Text>}
-          {selected && <PhaseVerification phase={selected} uat={state.snapshot?.overview?.uat?.phases.find((phase) => phase.id === selected.id)} theme={theme} compact={compact} isOpen={isOpen} onToggle={toggle} />}
-        </> : <Text style={textStyle(theme, true)}>No current-milestone phases declared in the roadmap.</Text>}
-      </> : <Card title="Verification unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></Card>}
-    </>}
-  </ScrollView>;
+  return <BoardFrame title="Verification" description="Goal-backward verification recorded for each phase: score, truths, gaps and human checks." subject="verification" state={state} onRefresh={onRefresh} theme={theme} compact={compact}
+    alerts={verification?.limited ? ["Some verification evidence or safe excerpts may be incomplete."] : []} notes={verificationNotes()}>
+    {verification?.availability === "available" ? <>
+      {verification.phases.length > 0 ? <>
+        <PhasePicker label="Verification phases" selected={selectedId ?? null} onSelect={(id) => setSelection({ workspaceId: state.workspaceId, phaseId: id })} theme={theme} phases={verification.phases.map((phase) => {
+          const summary = phaseSummary(phase);
+          const { verified, total } = phase.score ?? { verified: null, total: null };
+          const observed = phase.observation === "observed";
+          return { id: phase.id, current: phase.current, description: summary.text,
+            tone: summary.attention ? phase.statusKind === "gaps_found" || phase.openGapCount > 0 ? "danger" : "warning" : observed ? "success" : null,
+            detail: !observed ? summary.text.toLowerCase() : verified !== null && total !== null ? `${verified}/${total}` : phase.recordedStatus?.replace(/_/g, " ") ?? "no status",
+            percent: observed && verified !== null && total ? verified / total * 100 : undefined };
+        })} />
+        {!chosen && fallback.fallback && current?.observation === "not_observed" && selected && <Text style={smallStyle(theme)}>Phase {current.id} (current) has no verification report yet; showing Phase {selected.id}, the most recent phase with one.</Text>}
+        {selected && <PhaseVerification phase={selected} uat={state.snapshot?.overview?.uat?.phases.find((phase) => phase.id === selected.id)} theme={theme} compact={compact} isOpen={isOpen} onToggle={toggle} />}
+      </> : <Text style={textStyle(theme, true)}>No current-milestone phases declared in the roadmap.</Text>}
+    </> : <Card title="Verification unavailable" theme={theme}><Text style={textStyle(theme, true)}>No readable current-milestone roadmap was found.</Text></Card>}
+  </BoardFrame>;
 }

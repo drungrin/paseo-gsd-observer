@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import type { BoardPath, PathPanel, PathRecovery, PathReviewSet, PathWaveReview } from "../shared/path.js";
 import type { BoardViewState } from "./board-components.js";
-import { PathFrame, plural, SetupNotice, textStyle, tokenLabel, warningAlerts, type ThemeProps } from "./path-components.js";
+import { BoardFrame, plural, textStyle, tokenLabel, type ThemeProps } from "./board-frame.js";
+import { SetupNotice, warningAlerts } from "./path-components.js";
 import { kicker, line, figures, Pill, Section, Stat, surface, text, tint, toneColor, type Tone } from "./ui-kit.js";
 
 const negative = new Set(["blocked", "fail", "failed", "not-met", "unverifiable"]);
@@ -154,7 +155,7 @@ export function PathReviewsView({ state, onRefresh, theme, compact = false }: Th
   const open = latest.filter((review) => isNegative(review.verdict)).length;
   const passing = latest.length > 0 && latest.every((review) => isPositive(review.verdict));
   const openDetail = open ? "waiting on fixes" : !latest.length ? "no review cycle recorded" : passing ? "every wave's latest cycle passes" : "some latest cycles record no pass";
-  return <PathFrame title="Reviews" description="How each wave got through review: every cycle, its verdict, and what it sent back." subject="reviews" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={reviewsAlerts(path)} notes={reviewsNotes()}>
+  return <BoardFrame title="Reviews" description="How each wave got through review: every cycle, its verdict, and what it sent back." subject="reviews" state={state} onRefresh={onRefresh} theme={theme} compact={compact} alerts={reviewsAlerts(path)} notes={reviewsNotes()}>
     {!path ? <SetupNotice setup="unavailable" theme={theme} /> : path.setup !== "started" ? <SetupNotice setup={path.setup} theme={theme} /> : reviews?.availability === "available" && current ? <>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         <Stat theme={theme} size={22} label="Review cycles" value={String(cycles)} detail={`${plural(wavesOf(current).length, "wave")} reviewed`} />
@@ -175,5 +176,5 @@ export function PathReviewsView({ state, onRefresh, theme, compact = false }: Th
     </> : <Section theme={theme} title={reviews?.availability === "absent" ? "No reviews yet" : "Reviews unavailable"}>
       <Text style={text(theme, 13, "400", true)}>{reviews?.availability === "absent" ? "No review folder yet. GSD Path writes reviews during build and ship." : "The review files could not be read safely."}</Text>
     </Section>}
-  </PathFrame>;
+  </BoardFrame>;
 }

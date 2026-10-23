@@ -7,7 +7,7 @@ vi.mock("react", async (importOriginal) => (await import("../helpers/react-nativ
 import { expand } from "../helpers/react-native-mock";
 import { BOARD_TABS, PATH_TABS, pathBadges, tabForKey, tabsFor } from "../../client/board-tabs";
 import type { BoardViewState } from "../../client/board-components";
-import { liveStatus } from "../../client/path-components";
+import { liveStatus } from "../../client/board-frame";
 import { needsFor, overviewNotes, PathOverviewView, stationsFor } from "../../client/path-overview-components";
 import { PathQuestionsView, questionsNotes } from "../../client/path-questions-components";
 import { ledgerNotes, ledgerRow, PathLedgerView } from "../../client/path-ledger-components";
