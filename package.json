@@ -1,15 +1,33 @@
 {
-  "name": "paseo-gsd-observer",
+  "name": "@drungrin/paseo-gsd-observer",
+  "description": "A read-only Paseo plugin for understanding the persisted state of a GSD project.",
   "private": true,
   "type": "module",
   "version": "1.1.0",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drungrin/paseo-gsd-observer.git"
+  },
+  "files": [
+    "client",
+    "server",
+    "shared",
+    "index.client.tsx",
+    "index.server.ts",
+    "paseo-plugin.json"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest"
+    "test": "vitest",
+    "stage:npm": "node scripts/stage-npm-package.ts"
   },
   "dependencies": {
-    "chokidar": "4.0.3"
+    "chokidar": "4.0.3",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.8.0",
@@ -19,7 +37,6 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
-    "vitest": "4.1.11",
-    "zod": "^4.4.3"
+    "vitest": "4.1.11"
   }
 }
