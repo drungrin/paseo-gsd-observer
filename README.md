@@ -67,8 +67,22 @@ The board is an observer, not a control surface. It contains no terminal, agent,
 ## Requirements
 
 - Paseo plugin support compatible with the manifest range: `>=0.9.0`.
-- Node.js and this repository's dependencies installed with `npm ci`.
+- `npm` on the Paseo daemon host's path for npm and Git installs. A local checkout also needs its dependencies installed with `npm ci`.
 - An open, selected workspace containing GSD Core planning artifacts or a GSD Path project.
+
+## Install
+
+Install the published package. Paseo installs its dependencies:
+
+```sh
+paseo plugin install npm:@drungrin/paseo-gsd-observer
+```
+
+Or install from Git. Paseo runs the `npm ci` step that the plugin manifest declares:
+
+```sh
+paseo plugin install git:drungrin/paseo-gsd-observer
+```
 
 ## Install locally
 
